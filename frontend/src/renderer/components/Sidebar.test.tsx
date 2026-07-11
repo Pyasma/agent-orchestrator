@@ -198,7 +198,6 @@ describe("Sidebar", () => {
 		await user.click(screen.getByLabelText("Project actions for Project One"));
 		await user.click(await screen.findByRole("menuitem", { name: "Remove project" }));
 
-		// The ConfirmDialog renders via Radix Portal — find it by role
 		const dialog = await screen.findByRole("dialog", { name: "Remove project" });
 		expect(dialog).toBeInTheDocument();
 		expect(dialog).toHaveTextContent("Project One");
@@ -217,16 +216,13 @@ describe("Sidebar", () => {
 		await screen.findByRole("dialog", { name: "Remove project" });
 		await user.click(screen.getByRole("button", { name: "Cancel" }));
 
-		// Dialog should close and the handler must not have fired
 		await waitFor(() => expect(screen.queryByRole("dialog", { name: "Remove project" })).not.toBeInTheDocument());
 		expect(onRemoveProject).not.toHaveBeenCalled();
 	});
 
 	it("shows an error message inside the ConfirmDialog when removal fails", async () => {
 		const user = userEvent.setup();
-		const onRemoveProject = vi
-			.fn()
-			.mockRejectedValueOnce(new Error("Failed to remove project")) as RemoveProjectHandler;
+		const onRemoveProject = vi.fn().mockRejectedValueOnce(new Error("Failed to remove project")) as RemoveProjectHandler;
 		renderSidebar({ onRemoveProject });
 
 		await user.click(screen.getByLabelText("Project actions for Project One"));
@@ -234,10 +230,21 @@ describe("Sidebar", () => {
 		await screen.findByRole("dialog", { name: "Remove project" });
 		await user.click(screen.getByRole("button", { name: "Remove" }));
 
-		// The error text renders inside the dialog — find it by its destructive color class
 		expect(await screen.findByText("Failed to remove project")).toBeInTheDocument();
-		// Dialog stays open on failure so the user can retry or cancel
 		expect(screen.getByRole("dialog", { name: "Remove project" })).toBeInTheDocument();
+	});
+
+	it("shows the project name and context in the ConfirmDialog description", async () => {
+		const user = userEvent.setup();
+		renderSidebar();
+
+		await user.click(screen.getByLabelText("Project actions for Project One"));
+		await user.click(await screen.findByRole("menuitem", { name: "Remove project" }));
+
+		const dialog = await screen.findByRole("dialog", { name: "Remove project" });
+		expect(dialog).toHaveTextContent("Project One");
+		expect(dialog).toHaveTextContent("live sessions");
+		expect(dialog).toHaveTextContent("repository folder");
 	});
 
 	it("reveals dashboard and orchestrator buttons alongside the kebab on the project row", () => {
@@ -582,19 +589,6 @@ describe("Sidebar", () => {
 		);
 	});
 
-	it("shows the project name and context in the ConfirmDialog description", async () => {
-		const user = userEvent.setup();
-		renderSidebar();
-
-		await user.click(screen.getByLabelText("Project actions for Project One"));
-		await user.click(await screen.findByRole("menuitem", { name: "Remove project" }));
-
-		const dialog = await screen.findByRole("dialog", { name: "Remove project" });
-		expect(dialog).toHaveTextContent("Project One");
-		expect(dialog).toHaveTextContent("live sessions");
-		expect(dialog).toHaveTextContent("repository folder");
-	});
-
 	it("renames a session inline and persists via the daemon", async () => {
 		const user = userEvent.setup();
 		const workspaceWithSession = { ...workspace, sessions: [session] };
@@ -638,14 +632,14 @@ describe("Sidebar", () => {
 
 		if (!projectRow) throw new Error("Project row button not found");
 		// Padding is always reserved for the action cluster (not hover-gated)
-		expect(projectRow).toHaveClass("pr-[84px]");
+		expect(projectRow).toHaveClass("pr-sidebar-project-actions");
 	});
 
 	it("snaps to the real collapsed rail when dragged past the resize collapse threshold", async () => {
 		renderSidebar();
 
-		const resizeHandle = document.querySelector(".resize-handle--right");
-		if (!(resizeHandle instanceof HTMLElement)) throw new Error("Resize handle not found");
+		const resizeHandle = screen.getByTestId("resize-handle");
+		expect(resizeHandle).toBeInTheDocument();
 
 		expect(document.querySelector('[data-slot="sidebar"][data-state="expanded"]')).toBeInTheDocument();
 
@@ -684,8 +678,7 @@ describe("Sidebar", () => {
 		try {
 			renderSidebar();
 
-			const resizeHandle = document.querySelector(".resize-handle--right");
-			if (!(resizeHandle instanceof HTMLElement)) throw new Error("Resize handle not found");
+			const resizeHandle = screen.getByTestId("resize-handle");
 
 			fireEvent.pointerDown(resizeHandle, { clientX: 240 });
 			fireEvent.pointerMove(window, { clientX: 205 });

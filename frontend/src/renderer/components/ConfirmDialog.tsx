@@ -12,7 +12,6 @@ type ConfirmDialogProps = {
 	error?: string | null;
 	onConfirm: () => void;
 	onOpenChange: (open: boolean) => void;
-	size?: "default" | "sm";
 };
 
 export function ConfirmDialog({
@@ -25,7 +24,6 @@ export function ConfirmDialog({
 	error,
 	onConfirm,
 	onOpenChange,
-	size = "default",
 }: ConfirmDialogProps) {
 	return (
 		<Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -47,7 +45,7 @@ export function ConfirmDialog({
 						</div>
 					)}
 					<div className="mt-4 flex justify-end gap-2">
-						<Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy} size={size}>
+						<Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
 							Cancel
 						</Button>
 						<Button
@@ -58,7 +56,6 @@ export function ConfirmDialog({
 							}
 							onClick={onConfirm}
 							disabled={busy}
-							size={size}
 						>
 							{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
 							{confirmLabel}
