@@ -21,6 +21,11 @@ Closes #<!-- issue number -->
 
 <!-- Describe any manual testing you performed. -->
 
+## AI Disclosure
+
+- [ ] I wrote this code myself without AI assistance
+- [ ] I used AI to assist with this PR: <!-- specify which AI tools, e.g. Claude Code, ChatGPT, GitHub Copilot -->
+
 ## Checklist
 
 - [ ] My code follows the project's coding conventions (see `AGENTS.md` and `CONTRIBUTING.md`)
