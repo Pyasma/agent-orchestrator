@@ -17,7 +17,7 @@ Read these first:
 
 ## Picking an issue
 
-Browse [open issues](https://github.com/AgentWrapper/agent-orchestrator/issues).
+[Browse open issues](https://github.com/AgentWrapper/agent-orchestrator/issues).
 
 - **`good first issue`** - small, well-scoped, good for new contributors
 - **`help wanted`** - the team would appreciate community help
@@ -52,21 +52,6 @@ docs/             # Architecture, status, CLI docs, ADRs
 | OpenAPI spec generation | `backend/internal/httpd/apispec/` |
 | Frontend renderer | `frontend/src/` |
 | Frontend e2e tests | `frontend/e2e/` |
-
-## Coding conventions
-
-- **Backend:** Go. Follow `AGENTS.md` and existing code.
-  - Use `context.Context` as the first argument in I/O functions.
-  - CLI code calls the daemon HTTP API; it never accesses SQLite or adapters
-    directly.
-  - Keep changes surgical - no drive-by cleanup or speculative abstraction.
-- **Frontend:** TypeScript with React. It is a thin UI surface - daemon logic
-  stays in the backend.
-- **Commit messages:** Use conventional commits. Explain what and why, not how.
-
-  ```bash
-  git commit -m "feat: add user authentication flow"
-  ```
 
 ## Pull request checklist
 
