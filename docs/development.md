@@ -19,7 +19,7 @@ Additional runtime dependencies for the daemon:
 
 ## Project Layout
 
-```
+```text
 agent-orchestrator/
   backend/              # Go daemon (Cobra CLI, HTTP API, services, storage)
     cmd/ao/             # CLI entry point
@@ -205,12 +205,21 @@ See `packages/mobile/README.md` for details.
 2. Start the frontend (see Frontend > Run in development mode above).
 3. Open the desktop app — it connects to the loopback daemon automatically.
 
-For CLI-only usage, run commands directly against the daemon:
+For CLI-only usage, open two terminals:
+
+**Terminal 1 — start the daemon:**
 
 ```bash
-go run ./cmd/ao start    # start daemon in background
-go run ./cmd/ao status   # check daemon health
-go run ./cmd/ao --help   # list all commands
+cd backend
+go run ./cmd/ao start
+```
+
+**Terminal 2 — interact while the daemon is running:**
+
+```bash
+cd backend
+go run ./cmd/ao status
+go run ./cmd/ao --help
 ```
 
 ## Testing tips

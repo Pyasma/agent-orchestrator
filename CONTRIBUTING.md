@@ -28,7 +28,7 @@ first to get feedback.
 
 ## Project structure at a glance
 
-```
+```text
 backend/          # Go daemon - Cobra CLI, HTTP API, services, SQLite storage
 frontend/         # Electron + React desktop app (TypeScript)
 packages/
