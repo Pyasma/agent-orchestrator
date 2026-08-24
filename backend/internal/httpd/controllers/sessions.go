@@ -112,6 +112,7 @@ type SessionService interface {
 	InvalidateWorkspaceCache(id domain.SessionID)
 	Pin(ctx context.Context, id domain.SessionID) (domain.Session, error)
 	Unpin(ctx context.Context, id domain.SessionID) (domain.Session, error)
+	ListDetectedPorts(ctx context.Context, id domain.SessionID) ([]ports.DetectedPort, error)
 }
 
 // ActivityRecorder applies an agent activity-state signal to a session. It is
@@ -167,6 +168,7 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/preview/server", c.startPreviewServer)
 	r.Delete("/sessions/{sessionId}/preview/server", c.stopPreviewServer)
 	r.Get("/sessions/{sessionId}/preview/files/*", c.previewFile)
+	r.Get("/sessions/{sessionId}/preview/ports", c.previewDetectedPorts)
 	r.Post("/sessions/{sessionId}/attachments", c.stageAttachments)
 	r.Get("/sessions/{sessionId}/workspace/files", c.listWorkspaceFiles)
 	r.Get("/sessions/{sessionId}/workspace/file", c.getWorkspaceFile)
@@ -757,6 +759,31 @@ func (c *SessionsController) previewServerStatus(w http.ResponseWriter, r *http.
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, previewServerStatusResponse(c.PreviewServer.Status(sessionID(r))))
+}
+
+// previewDetectedPorts serves a best-effort "Detected ports" suggestion list,
+// scoped to descendants of the session's own runtime process (e.g. a dev
+// server the operator started manually inside the terminal). Unlike
+// previewServerStatus (start/stop/status of an AO-launched process, gated by
+// the worker-only browser capability) this never launches or controls
+// anything and never fails: a scan error or an unsupported runtime both come
+// back as an empty list, so it is an ordinary session-scoped read like
+// listWorkspaceFiles rather than a capability-gated mutation.
+func (c *SessionsController) previewDetectedPorts(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, http.MethodGet, "/api/v1/sessions/{sessionId}/preview/ports")
+		return
+	}
+	detected, err := c.Svc.ListDetectedPorts(r.Context(), sessionID(r))
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	views := make([]DetectedPort, 0, len(detected))
+	for _, d := range detected {
+		views = append(views, DetectedPort{Port: d.Port, PID: d.PID, Command: d.Command})
+	}
+	envelope.WriteJSON(w, http.StatusOK, PreviewDetectedPortsResponse{SessionID: sessionID(r), Ports: views})
 }
 
 func (c *SessionsController) startPreviewServer(w http.ResponseWriter, r *http.Request) {

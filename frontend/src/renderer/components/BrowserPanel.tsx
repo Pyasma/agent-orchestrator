@@ -11,6 +11,7 @@ import {
 	Minimize2,
 	Monitor,
 	MousePointer2,
+	Network,
 	Plus,
 	RefreshCw,
 	Smartphone,
@@ -19,11 +20,12 @@ import {
 } from "lucide-react";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { useBrowserView, type BrowserViewModel } from "../hooks/useBrowserView";
+import { useSessionDetectedPorts } from "../hooks/useSessionDetectedPorts";
 import { formatBrowserAnnotationMessage, type BrowserAnnotationSubmitPayload } from "../../shared/browser-annotations";
 import { MAX_BROWSER_TABS } from "../../shared/browser-tabs";
 import type { WorkspaceSession } from "../types/workspace";
 import { Button } from "./ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { Input } from "./ui/input";
 import { BrowserTabsRail, type BrowserTabsRailHandle } from "./BrowserTabsRail";
 import { cn } from "../lib/utils";
@@ -273,6 +275,8 @@ export function BrowserPanel({ session, active, poppedOut, onTogglePopOut }: Bro
 }
 
 export function BrowserPanelView({
+	active,
+	session,
 	poppedOut,
 	onTogglePopOut,
 	browserView,
@@ -323,6 +327,7 @@ export function BrowserPanelView({
 	const urlInputRef = useRef<HTMLInputElement>(null);
 	const [pinned, setPinned] = useState(() => window.localStorage.getItem(RAIL_PINNED_STORAGE_KEY) === "1");
 	const showTabsTrigger = !poppedOut && !pinned && tabs.length >= 2;
+	const detectedPorts = useSessionDetectedPorts(session.id, active);
 
 	const handlePinnedChange = useCallback((next: boolean) => {
 		setPinned(next);
@@ -399,6 +404,18 @@ export function BrowserPanelView({
 		urlInputRef.current?.focus();
 		urlInputRef.current?.select();
 	}, [openTab]);
+
+	// Same navigation path the address bar's own submit takes (see `submit`
+	// above): a plain client-side navigate, not a round trip through `ao
+	// preview <url>` on the daemon.
+	const handleOpenDetectedPort = useCallback(
+		(port: number) => {
+			const url = `http://127.0.0.1:${port}/`;
+			setUrlInput(url);
+			void navigate(url);
+		},
+		[navigate],
+	);
 
 	const handleSelectTab = useCallback(
 		async (tabId: string) => {
@@ -538,6 +555,47 @@ export function BrowserPanelView({
 					<span className="max-w-24 truncate text-caption text-accent" role="status">
 						{tabNotice}
 					</span>
+				) : null}
+				{detectedPorts.length > 0 ? (
+					<DropdownMenu>
+						<DropdownMenuTrigger asChild>
+							<Button
+								aria-label={t("browser.detectedPortsTitle", { count: detectedPorts.length })}
+								className="relative"
+								size="icon-sm"
+								title={t("browser.detectedPortsTitle", { count: detectedPorts.length })}
+								type="button"
+								variant="ghost"
+							>
+								<Network aria-hidden="true" className="size-icon-base" />
+								<span
+									aria-hidden="true"
+									className="pointer-events-none absolute -right-0.5 -top-0.5 grid min-w-4 place-items-center rounded-full bg-foreground px-1 font-mono text-[9px] font-semibold leading-4 text-background shadow-sm"
+								>
+									{detectedPorts.length}
+								</span>
+							</Button>
+						</DropdownMenuTrigger>
+						{/* See the device-preset DropdownMenuContent below for why this needs
+						    data-browser-native-overlay. */}
+						<DropdownMenuContent align="end" className="w-56" data-browser-native-overlay="true">
+							<DropdownMenuLabel>{t("browser.detectedPorts")}</DropdownMenuLabel>
+							{detectedPorts.map((detected) => (
+								<DropdownMenuItem
+									className="gap-1.5 font-mono"
+									key={`${detected.port}-${detected.pid}`}
+									onSelect={() => handleOpenDetectedPort(detected.port)}
+								>
+									<span className="flex-1 truncate" title={t("browser.openDetectedPort", { port: detected.port })}>
+										:{detected.port}
+									</span>
+									{detected.command ? (
+										<span className="shrink-0 truncate text-caption text-passive">{detected.command}</span>
+									) : null}
+								</DropdownMenuItem>
+							))}
+						</DropdownMenuContent>
+					</DropdownMenu>
 				) : null}
 				<DropdownMenu>
 					<DropdownMenuTrigger asChild>

@@ -412,6 +412,24 @@ type PreviewServerStatusResponse struct {
 	Logs          []string         `json:"logs"`
 }
 
+// DetectedPort is one listening TCP port found among the descendants of a
+// session's own runtime process tree -- a best-effort suggestion surface
+// distinct from PreviewServerStatusResponse's deterministic managed server
+// (see ports.DetectedPortLister).
+type DetectedPort struct {
+	Port    int    `json:"port"`
+	PID     int    `json:"pid"`
+	Command string `json:"command,omitempty"`
+}
+
+// PreviewDetectedPortsResponse lists the ports detected for one session.
+// Ports is always a JSON array, empty when the scan found nothing or the
+// current runtime does not support detection.
+type PreviewDetectedPortsResponse struct {
+	SessionID domain.SessionID `json:"sessionId"`
+	Ports     []DetectedPort   `json:"ports"`
+}
+
 // BrowserStatusQuery selects the session whose logical browser is inspected.
 type BrowserStatusQuery struct {
 	SessionID domain.SessionID `query:"sessionId" description:"AO session identifier."`

@@ -82,6 +82,14 @@ type interfaceTransitionCommander interface {
 	AcknowledgeInterfaceTransitionNotice(context.Context, domain.SessionID, string) (domain.SessionInterfaceTransition, error)
 }
 
+// detectedPortsLister is an optional command capability satisfied by the
+// concrete Session Manager. Kept separate from commander for the same reason
+// as interfaceTransitionCommander: focused service-layer test fakes should not
+// have to implement every optional runtime capability.
+type detectedPortsLister interface {
+	ListDetectedPorts(ctx context.Context, id domain.SessionID) ([]ports.DetectedPort, error)
+}
+
 // RollbackOutcome reports what happened in a rollback: either the seed row was
 // deleted, or the partially-spawned session was killed (runtime+workspace torn
 // down, row marked terminated).
@@ -534,6 +542,20 @@ func (s *Service) ResumeAgent(ctx context.Context, id domain.SessionID) (ResumeA
 		return ResumeAgentOutcome{}, err
 	}
 	return ResumeAgentOutcome{Session: session, Mode: restoreModeView(res.Mode)}, nil
+}
+
+// ListDetectedPorts scopes a system-wide listening-port scan to the
+// descendants of a session's own runtime process tree (see
+// ports.DetectedPortLister). It is a best-effort suggestion surface, distinct
+// from the deterministic managed-server lifecycle previewserver.Manager runs:
+// a build without the capability, an unknown session, or a scan failure all
+// yield an empty list rather than an error.
+func (s *Service) ListDetectedPorts(ctx context.Context, id domain.SessionID) ([]ports.DetectedPort, error) {
+	manager, ok := s.manager.(detectedPortsLister)
+	if !ok {
+		return nil, nil
+	}
+	return manager.ListDetectedPorts(ctx, id)
 }
 
 // InterfaceTransitionStatus returns capability and progress without launching

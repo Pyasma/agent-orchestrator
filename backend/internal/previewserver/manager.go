@@ -2,6 +2,15 @@
 // processes used by the desktop preview. It deliberately does not scan global
 // localhost ports: a server is started from an explicit project configuration,
 // so its worker, command, working directory, and URL are known.
+//
+// This is a different, non-contradictory capability from the best-effort
+// "Detected ports" suggestion list (see ports.DetectedPortLister and package
+// portscan): that surface intentionally DOES scan the host for listening
+// sockets, then narrows the result to descendants of a session's own runtime
+// process (e.g. a dev server the operator started manually inside the
+// terminal). It never manages a process lifecycle and always fails open to an
+// empty list, so it cannot substitute for -- or contradict -- the guarantees
+// this package makes about the server it launches and owns.
 package previewserver
 
 import (

@@ -22,6 +22,14 @@ vi.mock("../lib/api-client", () => ({
 			: fallback,
 }));
 
+const detectedPortsMock = vi.hoisted(() =>
+	vi.fn((_sessionId: string | undefined, _active: boolean) => [] as { port: number; pid: number; command?: string }[]),
+);
+
+vi.mock("../hooks/useSessionDetectedPorts", () => ({
+	useSessionDetectedPorts: detectedPortsMock,
+}));
+
 const hookState = vi.hoisted(() => ({
 	navigate: vi.fn(),
 	goBack: vi.fn(),
@@ -181,6 +189,8 @@ describe("BrowserPanel", () => {
 		hookState.setAnnotationMode.mockResolvedValue(undefined);
 		postMock.mockReset();
 		postMock.mockResolvedValue({ data: {} });
+		detectedPortsMock.mockReset();
+		detectedPortsMock.mockReturnValue([]);
 		annotationSubmitListeners.clear();
 		annotationCancelListeners.clear();
 		window.ao!.browser.onAnnotationSubmit = vi.fn((listener: (payload: BrowserAnnotationSubmitPayload) => void) => {
@@ -1247,6 +1257,35 @@ describe("BrowserPanel", () => {
 			const tooltip = await screen.findByRole("tooltip");
 			expect(tooltip.closest('[data-browser-native-overlay="true"]')).not.toBeNull();
 			expect(document.querySelector(OPEN_BROWSER_OVERLAY_SELECTOR)).not.toBeNull();
+		});
+	});
+
+	describe("detected ports", () => {
+		it("hides the detected-ports control when nothing is detected", () => {
+			render(<BrowserPanel active onTogglePopOut={() => undefined} poppedOut={false} session={session} />);
+			expect(screen.queryByRole("button", { name: /detected port/i })).not.toBeInTheDocument();
+		});
+
+		it("lists detected ports and opens the picked one the same way the address bar navigates", async () => {
+			detectedPortsMock.mockReturnValue([
+				{ port: 3000, pid: 111, command: "node server.js" },
+				{ port: 8080, pid: 222 },
+			]);
+			render(<BrowserPanel active onTogglePopOut={() => undefined} poppedOut={false} session={session} />);
+
+			await userEvent.click(screen.getByRole("button", { name: /2 detected ports/i }));
+			expect(screen.getByText(":3000")).toBeInTheDocument();
+			expect(screen.getByText("node server.js")).toBeInTheDocument();
+			expect(screen.getByText(":8080")).toBeInTheDocument();
+
+			await userEvent.click(screen.getByRole("menuitem", { name: /:3000/ }));
+
+			expect(hookState.navigate).toHaveBeenCalledWith("http://127.0.0.1:3000/");
+		});
+
+		it("passes the session id and active flag through to the detected-ports hook", () => {
+			render(<BrowserPanel active onTogglePopOut={() => undefined} poppedOut={false} session={session} />);
+			expect(detectedPortsMock).toHaveBeenCalledWith("sess-1", true);
 		});
 	});
 });

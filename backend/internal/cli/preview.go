@@ -26,6 +26,19 @@ type previewServerStartRequest struct {
 	Configuration string `json:"configuration,omitempty"`
 }
 
+// detectedPortDTO mirrors controllers.DetectedPort.
+type detectedPortDTO struct {
+	Port    int    `json:"port"`
+	PID     int    `json:"pid"`
+	Command string `json:"command,omitempty"`
+}
+
+// previewDetectedPortsDTO mirrors controllers.PreviewDetectedPortsResponse.
+type previewDetectedPortsDTO struct {
+	SessionID string            `json:"sessionId"`
+	Ports     []detectedPortDTO `json:"ports"`
+}
+
 type previewServerStatusDTO struct {
 	SessionID     string    `json:"sessionId"`
 	State         string    `json:"state"`
@@ -55,6 +68,7 @@ func newPreviewCommand(ctx *commandContext) *cobra.Command {
   ao preview start web
   ao preview status
   ao preview stop
+  ao preview ports
   ao preview clear`,
 		Args: atMostOneArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -124,6 +138,27 @@ func newPreviewCommand(ctx *commandContext) *cobra.Command {
 	}
 	stopCmd.Flags().BoolVar(&stopJSON, "json", false, "print JSON")
 	cmd.AddCommand(stopCmd)
+
+	var portsJSON bool
+	portsCmd := &cobra.Command{
+		Use:   "ports",
+		Short: "List listening ports detected among the descendants of this session's runtime process",
+		Long: "Best-effort suggestion list, not a managed server (see `ao preview start`\n" +
+			"for that): a system-wide listening-port scan narrowed to processes\n" +
+			"descending from this session's own runtime, e.g. a dev server started\n" +
+			"manually inside the terminal. Always succeeds; an unsupported runtime\n" +
+			"or a scan failure both come back as an empty list.",
+		Args: noArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			detected, err := ctx.previewDetectedPorts(cmd.Context())
+			if err != nil {
+				return err
+			}
+			return writePreviewDetectedPorts(cmd.OutOrStdout(), detected, portsJSON)
+		},
+	}
+	portsCmd.Flags().BoolVar(&portsJSON, "json", false, "print JSON")
+	cmd.AddCommand(portsCmd)
 	return cmd
 }
 
@@ -215,6 +250,27 @@ func (c *commandContext) stopPreviewServer(ctx context.Context) (previewServerSt
 	return out, err
 }
 
+func previewDetectedPortsPath() (string, error) {
+	path, err := sessionPreviewPath()
+	if err != nil {
+		return "", err
+	}
+	return path + "/ports", nil
+}
+
+// previewDetectedPorts is an ordinary session-scoped read, unlike the
+// preview/server family: it never launches or controls a process, so it
+// carries no AO_BROWSER_CAPABILITY requirement.
+func (c *commandContext) previewDetectedPorts(ctx context.Context) (previewDetectedPortsDTO, error) {
+	path, err := previewDetectedPortsPath()
+	if err != nil {
+		return previewDetectedPortsDTO{}, err
+	}
+	var out previewDetectedPortsDTO
+	err = c.getJSON(ctx, path, &out)
+	return out, err
+}
+
 func previewServerHeaders() (map[string]string, error) {
 	capability := strings.TrimSpace(os.Getenv("AO_BROWSER_CAPABILITY"))
 	if capability == "" {
@@ -243,6 +299,26 @@ func writePreviewServerStatus(out io.Writer, status previewServerStatusDTO, json
 		}
 	}
 	for _, line := range status.Logs {
+		if _, err := fmt.Fprintln(out, line); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writePreviewDetectedPorts(out io.Writer, detected previewDetectedPortsDTO, jsonOutput bool) error {
+	if jsonOutput {
+		return writeJSON(out, detected)
+	}
+	if len(detected.Ports) == 0 {
+		_, err := fmt.Fprintln(out, "No ports detected.")
+		return err
+	}
+	for _, port := range detected.Ports {
+		line := fmt.Sprintf("%d\tpid %d", port.Port, port.PID)
+		if port.Command != "" {
+			line += "\t" + port.Command
+		}
 		if _, err := fmt.Fprintln(out, line); err != nil {
 			return err
 		}

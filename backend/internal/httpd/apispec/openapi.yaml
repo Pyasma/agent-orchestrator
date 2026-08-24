@@ -3758,6 +3758,46 @@ paths:
       summary: Serve a static browser preview file from a session workspace
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/preview/ports:
+    get:
+      operationId: getSessionPreviewDetectedPorts
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreviewDetectedPortsResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List listening ports detected among the descendants of a session's
+        runtime process
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/preview/server:
     delete:
       operationId: stopSessionPreviewServer
@@ -6647,6 +6687,18 @@ components:
       - ok
       - workerId
       type: object
+    DetectedPort:
+      properties:
+        command:
+          type: string
+        pid:
+          type: integer
+        port:
+          type: integer
+      required:
+      - port
+      - pid
+      type: object
     DevImportProjectsConflict:
       properties:
         path:
@@ -7303,6 +7355,18 @@ components:
       - title
       - targetSha
       - status
+      type: object
+    PreviewDetectedPortsResponse:
+      properties:
+        ports:
+          items:
+            $ref: '#/components/schemas/DetectedPort'
+          type: array
+        sessionId:
+          type: string
+      required:
+      - sessionId
+      - ports
       type: object
     PreviewServerStatusResponse:
       properties:

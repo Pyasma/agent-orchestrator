@@ -62,6 +62,8 @@ type fakeSessionService struct {
 	handoffSource       domain.AgentGenerationID
 	autoInjectCISession domain.SessionID
 	autoInjectCIEnabled bool
+	detectedPorts       []ports.DetectedPort
+	detectedPortsErr    error
 }
 
 type fakeInterfaceTransitionSessionService struct {
@@ -290,6 +292,10 @@ func (f *fakeSessionService) Unpin(_ context.Context, id domain.SessionID) (doma
 	s.PinnedAt = nil
 	f.sessions[id] = s
 	return s, nil
+}
+
+func (f *fakeSessionService) ListDetectedPorts(_ context.Context, _ domain.SessionID) ([]ports.DetectedPort, error) {
+	return f.detectedPorts, f.detectedPortsErr
 }
 
 func (f *fakeSessionService) SetReviewerHarness(_ context.Context, id domain.SessionID, harness domain.ReviewerHarness) (domain.Session, error) {

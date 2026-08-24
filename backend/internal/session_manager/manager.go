@@ -2860,6 +2860,25 @@ func (m *Manager) applyWorkspaceProjectPreserved(ctx context.Context, rows []por
 // (flipped to active by the user-prompt-submit hook) and re-sends Enter until
 // the session is active or the budget is exhausted. Confirmation never fails
 // the send: it only decides whether to nudge again.
+// ListDetectedPorts scopes a system-wide listening-port scan to the
+// descendants of a session's own runtime process tree, via the optional
+// ports.DetectedPortLister capability (see the tmux and conpty runtime
+// adapters). It is a best-effort suggestion surface distinct from the
+// deterministic managed-server lifecycle previewserver.Manager runs: an
+// unknown session, a missing runtime handle, or a runtime lacking the
+// capability all yield an empty list rather than an error.
+func (m *Manager) ListDetectedPorts(ctx context.Context, id domain.SessionID) ([]ports.DetectedPort, error) {
+	lister, ok := m.runtime.(ports.DetectedPortLister)
+	if !ok {
+		return nil, nil
+	}
+	rec, found, err := m.store.GetSession(ctx, id)
+	if err != nil || !found || rec.Metadata.RuntimeHandleID == "" {
+		return nil, nil
+	}
+	return lister.ListDetectedPorts(ctx, runtimeHandle(rec.Metadata))
+}
+
 func (m *Manager) Send(ctx context.Context, id domain.SessionID, message string, attachment *ports.SpawnAttachment) error {
 	if attachment != nil {
 		// Reuses StageAttachments rather than a bespoke writer: it already owns the

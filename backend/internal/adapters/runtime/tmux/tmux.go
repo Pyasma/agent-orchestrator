@@ -20,6 +20,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/ptyexec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/portscan"
 )
 
 const (
@@ -45,6 +46,10 @@ const (
 var sessionIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 var getenv = os.Getenv
+
+// listListeningTCP is portscan.ListListeningTCP, indirected so tests can
+// stub the system-wide socket scan without shelling out to a real lsof.
+var listListeningTCP = portscan.ListListeningTCP
 
 // Options configures a tmux Runtime. Every field has a sensible default (see
 // New), so the zero value is usable.
@@ -72,6 +77,7 @@ type Runtime struct {
 
 var _ ports.Runtime = (*Runtime)(nil)
 var _ ports.Attacher = (*Runtime)(nil)
+var _ ports.DetectedPortLister = (*Runtime)(nil)
 
 type runner interface {
 	Run(ctx context.Context, env []string, name string, args ...string) ([]byte, error)
@@ -570,6 +576,48 @@ func (r *Runtime) supervisedProcessTree(ctx context.Context, handle ports.Runtim
 		return nil, 0, fmt.Errorf("tmux runtime: parse process tree %s: %w", id, err)
 	}
 	return entries, panePID, nil
+}
+
+// ListDetectedPorts implements ports.DetectedPortLister. It runs a
+// system-wide listening-socket scan (portscan.ListListeningTCP) and keeps
+// only the sockets owned by a descendant of the session's own tmux pane,
+// reusing the same pane-pid + process-tree walk supervisedProcessTree relies
+// on. This is a best-effort suggestion surface, not the deterministic managed
+// server previewserver.Manager runs: any failure here (an unreachable pane, a
+// missing lsof binary, a probe error) yields an empty list rather than an
+// error.
+func (r *Runtime) ListDetectedPorts(ctx context.Context, handle ports.RuntimeHandle) ([]ports.DetectedPort, error) {
+	entries, panePID, err := r.supervisedProcessTree(ctx, handle)
+	if err != nil {
+		return nil, nil
+	}
+	sockets, err := listListeningTCP(ctx)
+	if err != nil {
+		return nil, nil
+	}
+	descendants := descendantPIDs(entries, panePID)
+	commands := make(map[int]string, len(entries))
+	for _, entry := range entries {
+		commands[entry.pid] = entry.command
+	}
+	var detected []ports.DetectedPort
+	for _, socket := range sockets {
+		if !descendants[socket.PID] {
+			continue
+		}
+		command := commands[socket.PID]
+		if command == "" {
+			command = socket.Command
+		}
+		detected = append(detected, ports.DetectedPort{Port: socket.Port, PID: socket.PID, Command: command})
+	}
+	sort.Slice(detected, func(i, j int) bool {
+		if detected[i].Port != detected[j].Port {
+			return detected[i].Port < detected[j].Port
+		}
+		return detected[i].PID < detected[j].PID
+	})
+	return detected, nil
 }
 
 // SendMessage sends literal text to the session (chunked via send-keys -l) then

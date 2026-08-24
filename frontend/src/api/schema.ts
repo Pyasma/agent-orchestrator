@@ -1241,6 +1241,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/preview/ports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List listening ports detected among the descendants of a session's runtime process */
+        get: operations["getSessionPreviewDetectedPorts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/preview/server": {
         parameters: {
             query?: never;
@@ -2242,6 +2259,11 @@ export interface components {
             orchestratorId?: string;
             workerId: string;
         };
+        DetectedPort: {
+            command?: string;
+            pid: number;
+            port: number;
+        };
         DevImportProjectsConflict: {
             path: string;
             projectId: string;
@@ -2502,6 +2524,10 @@ export interface components {
             status: "needs_review" | "running" | "up_to_date" | "changes_requested" | "ineligible";
             targetSha: string;
             title: string;
+        };
+        PreviewDetectedPortsResponse: {
+            ports: components["schemas"]["DetectedPort"][];
+            sessionId: string;
         };
         PreviewServerStatusResponse: {
             configuration?: string;
@@ -7924,6 +7950,56 @@ export interface operations {
                 };
                 content: {
                     "text/html": string;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getSessionPreviewDetectedPorts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreviewDetectedPortsResponse"];
                 };
             };
             /** @description Not Found */

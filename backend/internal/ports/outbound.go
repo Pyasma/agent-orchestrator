@@ -153,6 +153,28 @@ type ExactSupervisedProcessInspector interface {
 	IsExactSupervisedProcessAlive(ctx context.Context, handle RuntimeHandle, ref SupervisedProcessRef) (bool, error)
 }
 
+// DetectedPort is one listening TCP port found among the descendants of a
+// runtime session's own root process (e.g. a dev server the operator started
+// manually inside the terminal, as opposed to previewserver's deterministic
+// managed servers). Command is best-effort and may be empty when the scanning
+// tool did not report it.
+type DetectedPort struct {
+	Port    int    `json:"port"`
+	PID     int    `json:"pid"`
+	Command string `json:"command,omitempty"`
+}
+
+// DetectedPortLister is an optional runtime capability that scopes a
+// system-wide listening-socket scan to the descendants of one session's
+// runtime process tree. It is a best-effort suggestion surface, not a managed
+// lifecycle (see previewserver.Manager for that): implementations MUST fail
+// open, returning an empty slice with a nil error, whenever the underlying
+// scan cannot run (missing scan tool, permission denial, probe failure) --
+// this must never surface as a user-facing error.
+type DetectedPortLister interface {
+	ListDetectedPorts(ctx context.Context, handle RuntimeHandle) ([]DetectedPort, error)
+}
+
 // ContainerReaper removes Docker containers a worker session owns, identified
 // by the ao.session=<id> label convention (see EnvSessionID). It is an
 // optional capability: nil wiring means container reaping is a no-op, not an

@@ -14,6 +14,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/portscan"
 )
 
 // -- fakeRunner test seam --
@@ -1386,4 +1387,78 @@ func exitCodeErr(t *testing.T, code int) error {
 		t.Fatalf("sh -c 'exit %d' should fail", code)
 	}
 	return err
+}
+
+// -- ListDetectedPorts --
+
+func stubListListeningTCP(t *testing.T, sockets []portscan.Socket, err error) {
+	t.Helper()
+	original := listListeningTCP
+	listListeningTCP = func(context.Context) ([]portscan.Socket, error) {
+		return sockets, err
+	}
+	t.Cleanup(func() { listListeningTCP = original })
+}
+
+func TestListDetectedPortsIntersectsSystemScanWithPaneDescendants(t *testing.T) {
+	r, fr := newTestRuntime(0)
+	fr.outputs = [][]byte{
+		[]byte("100\n"),
+		[]byte("100 1 /bin/sh -c launch\n101 100 node server.js\n200 1 unrelated-daemon\n"),
+	}
+	stubListListeningTCP(t, []portscan.Socket{
+		{Port: 3000, PID: 101, Command: "node"},   // descendant of pane -> kept
+		{Port: 5432, PID: 200, Command: "unrel"},  // unrelated pid -> dropped
+		{Port: 9999, PID: 9999, Command: "ghost"}, // pid not in process table -> dropped
+	}, nil)
+
+	got, err := r.ListDetectedPorts(context.Background(), ports.RuntimeHandle{ID: "sess-1"})
+	if err != nil {
+		t.Fatalf("ListDetectedPorts returned err = %v, want nil", err)
+	}
+	want := []ports.DetectedPort{{Port: 3000, PID: 101, Command: "node server.js"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ListDetectedPorts = %#v, want %#v", got, want)
+	}
+}
+
+func TestListDetectedPortsPrefersProcessTableCommandOverScanCommand(t *testing.T) {
+	r, fr := newTestRuntime(0)
+	fr.outputs = [][]byte{
+		[]byte("100\n"),
+		[]byte("100 1 /bin/sh -c launch\n101 100 node server.js --port 3000\n"),
+	}
+	stubListListeningTCP(t, []portscan.Socket{{Port: 3000, PID: 101, Command: "node"}}, nil)
+
+	got, err := r.ListDetectedPorts(context.Background(), ports.RuntimeHandle{ID: "sess-1"})
+	if err != nil {
+		t.Fatalf("ListDetectedPorts returned err = %v, want nil", err)
+	}
+	if len(got) != 1 || got[0].Command != "node server.js --port 3000" {
+		t.Fatalf("ListDetectedPorts = %#v, want the fuller ps command", got)
+	}
+}
+
+func TestListDetectedPortsFailsOpenOnScanError(t *testing.T) {
+	r, fr := newTestRuntime(0)
+	fr.outputs = [][]byte{
+		[]byte("100\n"),
+		[]byte("100 1 /bin/sh -c launch\n101 100 node server.js\n"),
+	}
+	stubListListeningTCP(t, nil, errors.New("exec: \"lsof\": executable file not found"))
+
+	got, err := r.ListDetectedPorts(context.Background(), ports.RuntimeHandle{ID: "sess-1"})
+	if err != nil || got != nil {
+		t.Fatalf("ListDetectedPorts = (%#v, %v), want (nil, nil) on a fail-open scan error", got, err)
+	}
+}
+
+func TestListDetectedPortsFailsOpenOnProcessTreeError(t *testing.T) {
+	r, fr := newTestRuntime(0)
+	fr.err = errors.New("tmux: display-message failed")
+
+	got, err := r.ListDetectedPorts(context.Background(), ports.RuntimeHandle{ID: "sess-1"})
+	if err != nil || got != nil {
+		t.Fatalf("ListDetectedPorts = (%#v, %v), want (nil, nil) on a fail-open process-tree error", got, err)
+	}
 }

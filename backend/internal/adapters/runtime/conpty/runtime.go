@@ -20,6 +20,7 @@ const runtimeLaunchIDEnv = "AO_RUNTIME_LAUNCH_ID"
 // Ensure Runtime satisfies the port at compile time (Attach in attach.go).
 var _ ports.Runtime = (*Runtime)(nil)
 var _ ports.StyledTerminalOutputReader = (*Runtime)(nil)
+var _ ports.DetectedPortLister = (*Runtime)(nil)
 
 // validSessionID matches agent-orchestrator's assertValidSessionId.
 var validSessionID = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
@@ -322,6 +323,18 @@ func (r *Runtime) GetStyledOutput(ctx context.Context, handle ports.RuntimeHandl
 			protocolVersion, ports.ErrStyledTerminalOutputUnavailable)
 	}
 	return clientGetStyledOutput(ctx, sess.addr, lines)
+}
+
+// ListDetectedPorts implements ports.DetectedPortLister via the platform hook
+// in descendants_windows.go (listDetectedPorts). sess.pid is the pty-host's
+// own OS pid; the ConPTY-spawned shell is its direct child, so scoping the
+// walk there covers the whole session process tree.
+func (r *Runtime) ListDetectedPorts(ctx context.Context, handle ports.RuntimeHandle) ([]ports.DetectedPort, error) {
+	sess := r.resolve(handle.ID)
+	if sess == nil {
+		return nil, nil
+	}
+	return listDetectedPorts(ctx, sess.pid)
 }
 
 // resolveHostProtocol negotiates capabilities when a daemon adopts a detached
