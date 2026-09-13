@@ -109,10 +109,11 @@ func (m *Manager) InterfaceTransitionStatus(
 			status.ReasonCode = "INTERFACE_HANDOFF_UNSUPPORTED"
 		} else if errors.Is(err, ErrNativeConversationMissing) {
 			status.ReasonCode = "NATIVE_SESSION_MISSING"
-		} else if errors.Is(err, ErrNativeConversationUnverified) {
-			status.ReasonCode = "NATIVE_SESSION_UNVERIFIED"
 		} else {
-			return InterfaceTransitionStatus{}, err
+			// Config-load or transcript-inspection blips must not hard-error
+			// the polled status: report unverified so the client keeps
+			// polling with the control disabled. Start still fails hard.
+			status.ReasonCode = "NATIVE_SESSION_UNVERIFIED"
 		}
 		status.Reason = err.Error()
 	} else {

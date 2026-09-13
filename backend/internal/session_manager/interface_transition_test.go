@@ -2324,3 +2324,34 @@ func TestRecoverInterruptedTUIToChatRollsBackCommittedModeBeforeReconcile(t *tes
 		t.Fatalf("source native conversation = %q, want native-1", rec.Metadata.AgentSessionID)
 	}
 }
+
+type failingProbeTransitionAgent struct{ transitionAgent }
+
+func (failingProbeTransitionAgent) NativeConversationExists(context.Context, ports.SessionRef, string, map[string]string) (bool, error) {
+	return false, errors.New("transcript root unreadable")
+}
+
+func TestInterfaceTransitionStatusReportsUnverifiedWhenInspectionFails(t *testing.T) {
+	manager, store, _, _, _ := newTransitionManager(t, domain.SessionModeTUI)
+	manager.agents = singleAgent{agent: failingProbeTransitionAgent{}}
+	rec := store.sessions["session-1"]
+	rec.Metadata.AgentSessionID = "native-fresh"
+	rec.Metadata.AgentSessionIDLaunchID = rec.Metadata.RuntimeLaunchID
+	store.sessions["session-1"] = rec
+
+	status, err := manager.InterfaceTransitionStatus(context.Background(), "session-1")
+	if err != nil {
+		t.Fatalf("InterfaceTransitionStatus: %v", err)
+	}
+	if status.Supported {
+		t.Fatal("status enabled a switch whose readiness could not be inspected")
+	}
+	if status.ReasonCode != "NATIVE_SESSION_UNVERIFIED" {
+		t.Fatalf("reasonCode = %q, want NATIVE_SESSION_UNVERIFIED", status.ReasonCode)
+	}
+	if _, err := manager.StartInterfaceTransition(
+		context.Background(), "session-1", domain.SessionModeChat, domain.SessionInterfaceTransitionDrain,
+	); err == nil || !strings.Contains(err.Error(), "transcript root unreadable") {
+		t.Fatalf("StartInterfaceTransition error = %v, want inspection failure", err)
+	}
+}
