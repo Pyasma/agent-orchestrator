@@ -100,7 +100,7 @@ func TestReviewCommandLaunchesReadOnlyOffBypass(t *testing.T) {
 	if !contains(agent.got.AllowedTools, "Read") || !contains(agent.got.AllowedTools, "Bash(ao review submit:*)") {
 		t.Fatalf("allowlist missing read-only review tools: %#v", agent.got.AllowedTools)
 	}
-	for _, denied := range []string{"Edit", "Write", "Bash(git push:*)", "Bash(git commit:*)"} {
+	for _, denied := range []string{"Edit", "Write", "Bash(git push:*)", "Bash(git commit:*)", "Bash(gh pr merge:*)"} {
 		if !contains(agent.got.DisallowedTools, denied) {
 			t.Fatalf("disallow list missing %q: %#v", denied, agent.got.DisallowedTools)
 		}
