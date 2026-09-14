@@ -334,15 +334,18 @@ let soundNotificationsEnabled = DEFAULT_UI_SETTINGS.soundNotificationsEnabled;
 // the OS beep; otherwise the imported file under ~/.ao/notification-sound.
 let notificationSoundPath: string | null = DEFAULT_UI_SETTINGS.notificationSoundPath;
 // The custom sound's bytes, read once per path so a burst of notifications does
-// not hit the disk for each one. Reset whenever the path changes.
-let notificationSoundCache: { path: string; payload: NotificationSoundPayload | null } | null = null;
+// not hit the disk for each one. Reset whenever the path changes. Only a
+// successful read is cached: a transient failure retries on the next
+// notification instead of sticking for the whole session.
+let notificationSoundCache: { path: string; payload: NotificationSoundPayload } | null = null;
 
 async function loadNotificationSound(): Promise<NotificationSoundPayload | null> {
 	const soundPath = notificationSoundPath;
-	if (!soundPath) return null;
+	const runFile = runFilePath();
+	if (!soundPath || !runFile) return null;
 	if (notificationSoundCache?.path === soundPath) return notificationSoundCache.payload;
-	const payload = await readNotificationSound(soundPath);
-	notificationSoundCache = { path: soundPath, payload };
+	const payload = await readNotificationSound(path.dirname(runFile), soundPath);
+	if (payload) notificationSoundCache = { path: soundPath, payload };
 	return payload;
 }
 
@@ -2320,12 +2323,15 @@ ipcMain.handle("uiSettings:get", async (): Promise<UiSettings> => {
 	if (!runFile) return { ...DEFAULT_UI_SETTINGS };
 	return readUiSettings(path.dirname(runFile));
 });
-	ipcMain.handle("uiSettings:set", async (_event, settings: Partial<UiSettings>): Promise<UiSettings> => {
+	ipcMain.handle("uiSettings:set", async (_event, rawSettings: Partial<UiSettings>): Promise<UiSettings> => {
 		const runFile = runFilePath();
+	// `notificationSoundPath` is owned by notificationSound:choose/clear, which
+	// are the only flows that put a file under the managed directory; a generic
+	// settings write must not point it anywhere else.
+	const { notificationSoundPath: _ignored, ...settings } = rawSettings;
 	const result = !runFile ? coerceUiSettings(settings) : await writeUiSettings(path.dirname(runFile), settings);
 	trayController?.setLocale(result.locale);
 	soundNotificationsEnabled = result.soundNotificationsEnabled;
-	notificationSoundPath = result.notificationSoundPath;
 	terminalShellPreference = result.terminalShell;
 	shellEnvPromise = null;
 	cachedShellEnv = null;
@@ -2372,15 +2378,22 @@ function cancelDockBounce(): void {
 
 ipcMain.handle(
 	"notifications:show",
-	(_event, notification: { id: string; title: string; body?: string; type?: string }) => {
+	async (_event, notification: { id: string; title: string; body?: string; type?: string }) => {
 		if (!notification.id || !mainWindow) return;
 		// Only signal when the window isn't already focused (the user is looking).
 		if (mainWindow.isFocused()) return;
+		const playsSound = shouldSignalAttention(notification.type) && soundNotificationsEnabled;
+		// Resolve the custom sound up front so the toast's `silent` flag reflects
+		// what will actually play: a configured-but-unreadable file falls back to
+		// the beep, so the toast must not also go quiet.
+		const customSound = playsSound ? await loadNotificationSound() : null;
+		const shell_ = getShellWebContents();
+		const playsCustomSound = customSound !== null && shell_ !== null && !shell_.isDestroyed();
+		// The disk read above yielded; the window may have been focused or closed since.
+		if (!mainWindow || mainWindow.isFocused()) return;
 		// OS toast: a native banner the user can click to jump straight back to the
 		// session. Fires for every backend notification type (see shouldToast), so a
 		// new type in notification.go never silently loses its toast.
-		const playsCustomSound =
-			shouldSignalAttention(notification.type) && soundNotificationsEnabled && notificationSoundPath !== null;
 		if (shouldToast(notification, ElectronNotification.isSupported())) {
 			const toast = new ElectronNotification({
 				title: notification.title,
@@ -2435,9 +2448,9 @@ ipcMain.handle(
 				});
 			}
 		}
-		if (shouldSignalAttention(notification.type) && soundNotificationsEnabled) {
-			void playNotificationSound();
-		}
+		if (!playsSound) return;
+		if (playsCustomSound) shell_.send("notifications:playSound", customSound);
+		else shell.beep();
 	},
 );
 

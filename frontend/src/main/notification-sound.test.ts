@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, readdir, rm, writeFile, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -9,6 +9,7 @@ import {
 	NotificationSoundImportError,
 	clearNotificationSound,
 	importNotificationSound,
+	isManagedNotificationSoundPath,
 	notificationSoundMimeType,
 	readNotificationSound,
 } from "./notification-sound";
@@ -46,7 +47,7 @@ describe("notification-sound", () => {
 
 		// The original is no longer needed once imported.
 		await rm(source);
-		expect(await readNotificationSound(copied)).toEqual({ bytes: new Uint8Array([1, 2, 3]), mimeType: "audio/wav" });
+		expect(await readNotificationSound(stateDir, copied)).toEqual({ bytes: new Uint8Array([1, 2, 3]), mimeType: "audio/wav" });
 	});
 
 	it("replaces a previously imported sound instead of accumulating files", async () => {
@@ -73,10 +74,32 @@ describe("notification-sound", () => {
 		});
 	});
 
+	it("keeps the previous sound when copying the replacement fails", async () => {
+		const first = await importNotificationSound(stateDir, await writeSource("one.mp3", "a"));
+		// A directory passes the extension check but is not a regular file.
+		const unreadable = path.join(sourceDir, "two.ogg");
+		await mkdir(unreadable);
+		await expect(importNotificationSound(stateDir, unreadable)).rejects.toMatchObject({ code: "unreadable" });
+		expect(await readdir(path.join(stateDir, NOTIFICATION_SOUND_DIR_NAME))).toEqual([path.basename(first)]);
+	});
+
 	it("reads null for no sound, a vanished file, or an unsupported path so callers fall back to the beep", async () => {
-		expect(await readNotificationSound(null)).toBeNull();
-		expect(await readNotificationSound(path.join(stateDir, "missing.mp3"))).toBeNull();
-		expect(await readNotificationSound(await writeSource("x.txt", "nope"))).toBeNull();
+		expect(await readNotificationSound(stateDir, null)).toBeNull();
+		expect(await readNotificationSound(stateDir, path.join(stateDir, NOTIFICATION_SOUND_DIR_NAME, "missing.mp3"))).toBeNull();
+		const imported = await importNotificationSound(stateDir, await writeSource("x.wav", "ok"));
+		await writeFile(path.join(stateDir, NOTIFICATION_SOUND_DIR_NAME, "x.txt"), "nope");
+		expect(await readNotificationSound(stateDir, imported.replace(/x\.wav$/, "x.txt"))).toBeNull();
+	});
+
+	it("refuses to read a sound outside the managed directory", async () => {
+		const outside = await writeSource("outside.mp3", "leak");
+		expect(isManagedNotificationSoundPath(stateDir, outside)).toBe(false);
+		expect(isManagedNotificationSoundPath(stateDir, path.join(stateDir, NOTIFICATION_SOUND_DIR_NAME))).toBe(false);
+		expect(isManagedNotificationSoundPath(stateDir, path.join(stateDir, NOTIFICATION_SOUND_DIR_NAME, "..", "ui-settings.json"))).toBe(
+			false,
+		);
+		expect(isManagedNotificationSoundPath(stateDir, path.join(stateDir, NOTIFICATION_SOUND_DIR_NAME, "ding.mp3"))).toBe(true);
+		expect(await readNotificationSound(stateDir, outside)).toBeNull();
 	});
 
 	it("clears the imported sound and tolerates nothing being there", async () => {

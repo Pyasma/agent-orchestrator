@@ -75,17 +75,30 @@ export async function importNotificationSound(stateDir: string, sourcePath: stri
 
 	const dir = path.join(stateDir, NOTIFICATION_SOUND_DIR_NAME);
 	await mkdir(dir, { recursive: true, mode: 0o750 });
-	// One sound at a time: drop stale copies so a rename never leaves orphans behind.
-	for (const entry of await readdir(dir)) {
-		await rm(path.join(dir, entry), { force: true });
-	}
-	const destination = path.join(dir, path.basename(sourcePath));
+	const name = path.basename(sourcePath);
+	const destination = path.join(dir, name);
+	// Copy before pruning: a failed copy must leave the previous sound (and the
+	// setting still pointing at it) intact rather than deleting it first.
 	try {
 		await copyFile(sourcePath, destination);
 	} catch {
 		throw new NotificationSoundImportError("unreadable");
 	}
+	// One sound at a time: drop stale copies so a rename never leaves orphans behind.
+	for (const entry of await readdir(dir)) {
+		if (entry !== name) await rm(path.join(dir, entry), { force: true });
+	}
 	return destination;
+}
+
+/**
+ * Whether `soundPath` lives inside `<stateDir>/notification-sound/`. Only the
+ * import flow writes there, so anything else in `ui-settings.json` (hand-edited
+ * or pushed through `uiSettings:set`) is never read as a sound file.
+ */
+export function isManagedNotificationSoundPath(stateDir: string, soundPath: string): boolean {
+	const relative = path.relative(path.join(stateDir, NOTIFICATION_SOUND_DIR_NAME), soundPath);
+	return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
 
 /** Remove the imported sound file, if any. Missing files are not an error. */
@@ -95,11 +108,15 @@ export async function clearNotificationSound(stateDir: string): Promise<void> {
 
 /**
  * Read the imported sound for playback. Returns `null` when no custom sound is
- * configured or the file can no longer be read, so callers fall back to the
- * system beep instead of dropping the notification's sound entirely.
+ * configured, the path is outside the managed directory, or the file can no
+ * longer be read, so callers fall back to the system beep instead of dropping
+ * the notification's sound entirely.
  */
-export async function readNotificationSound(soundPath: string | null): Promise<NotificationSoundPayload | null> {
-	if (!soundPath) return null;
+export async function readNotificationSound(
+	stateDir: string,
+	soundPath: string | null,
+): Promise<NotificationSoundPayload | null> {
+	if (!soundPath || !isManagedNotificationSoundPath(stateDir, soundPath)) return null;
 	const mimeType = notificationSoundMimeType(soundPath);
 	if (!mimeType) return null;
 	try {
