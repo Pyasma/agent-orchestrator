@@ -1,3 +1,4 @@
+import { FolderOpen, Play, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ThemePreference, ThemeStyle } from "../../lib/theme";
@@ -247,42 +248,48 @@ export function GeneralSettingsSection({
 					</p>
 				) : null}
 				<SettingsRow label={t("settings.notificationSound")}>
-					<div className="flex min-w-0 items-center gap-2">
+					<div className="flex min-w-0 items-center gap-1">
 						<span className="settings-row-value" title={notificationSoundPath ?? undefined}>
 							{notificationSoundPath ? fileName(notificationSoundPath) : t("settings.notificationSound.systemDefault")}
 						</span>
 						<Button
+							aria-label={t("settings.notificationSound.choose")}
+							title={t("settings.notificationSound.choose")}
 							type="button"
-							variant="outline"
-							size="sm"
+							variant="ghost"
+							size="icon-sm"
 							disabled={soundNotificationsSaving}
 							onClick={() => {
 								void chooseNotificationSound();
 							}}
 						>
-							{t("settings.notificationSound.choose")}
+							<FolderOpen aria-hidden="true" className="size-icon-base" />
 						</Button>
 						<Button
+							aria-label={t("settings.notificationSound.test")}
+							title={t("settings.notificationSound.test")}
 							type="button"
-							variant="outline"
-							size="sm"
+							variant="ghost"
+							size="icon-sm"
 							onClick={() => {
 								void previewNotificationSound();
 							}}
 						>
-							{t("settings.notificationSound.test")}
+							<Play aria-hidden="true" className="size-icon-base" />
 						</Button>
 						{notificationSoundPath ? (
 							<Button
+								aria-label={t("settings.notificationSound.reset")}
+								title={t("settings.notificationSound.reset")}
 								type="button"
 								variant="ghost"
-								size="sm"
+								size="icon-sm"
 								disabled={soundNotificationsSaving}
 								onClick={() => {
 									void clearNotificationSound();
 								}}
 							>
-								{t("settings.notificationSound.reset")}
+								<RotateCcw aria-hidden="true" className="size-icon-base" />
 							</Button>
 						) : null}
 					</div>
