@@ -253,6 +253,7 @@ export async function installFakeBridge(page: Page, opts: FakeBridgeOptions = {}
 					choose: async () => ({ settings: null, error: null }),
 					clear: async () => ({ ...DEFAULT_UI_SETTINGS }),
 					preview: async () => undefined,
+				reportPlaybackFailure: () => undefined,
 					onPlay: () => () => undefined,
 				},
 				keybindings: {
@@ -789,6 +790,7 @@ export async function installFakeAgent(page: Page, opts: FakeAgentOptions = {}):
 					choose: async () => ({ settings: null, error: null }),
 					clear: async () => ({ ...DEFAULT_UI_SETTINGS }),
 					preview: async () => undefined,
+				reportPlaybackFailure: () => undefined,
 					onPlay: () => () => undefined,
 				},
 				keybindings: {

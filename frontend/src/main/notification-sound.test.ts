@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdir, mkdtemp, readdir, rm, writeFile, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -9,7 +9,8 @@ import {
 	NotificationSoundImportError,
 	clearNotificationSound,
 	importNotificationSound,
-	isManagedNotificationSoundPath,
+	pruneNotificationSounds,
+	resolveManagedNotificationSoundPath,
 	notificationSoundMimeType,
 	readNotificationSound,
 } from "./notification-sound";
@@ -50,10 +51,23 @@ describe("notification-sound", () => {
 		expect(await readNotificationSound(stateDir, copied)).toEqual({ bytes: new Uint8Array([1, 2, 3]), mimeType: "audio/wav" });
 	});
 
-	it("replaces a previously imported sound instead of accumulating files", async () => {
+	it("keeps the previous sound until the caller prunes after persisting the new path", async () => {
 		await importNotificationSound(stateDir, await writeSource("one.mp3", "a"));
-		await importNotificationSound(stateDir, await writeSource("two.ogg", "b"));
+		const second = await importNotificationSound(stateDir, await writeSource("two.ogg", "b"));
+		expect((await readdir(path.join(stateDir, NOTIFICATION_SOUND_DIR_NAME))).sort()).toEqual(["one.mp3", "two.ogg"]);
+		await pruneNotificationSounds(stateDir, second);
 		expect(await readdir(path.join(stateDir, NOTIFICATION_SOUND_DIR_NAME))).toEqual(["two.ogg"]);
+		// Nothing to prune is not an error.
+		await clearNotificationSound(stateDir);
+		await expect(pruneNotificationSounds(stateDir, second)).resolves.toBeUndefined();
+	});
+
+	it("replaces a same-named sound atomically and leaves no temp file behind", async () => {
+		const first = await importNotificationSound(stateDir, await writeSource("ding.wav", "old"));
+		const second = await importNotificationSound(stateDir, await writeSource("ding.wav", "new"));
+		expect(second).toBe(first);
+		expect(await readFile(second, "utf8")).toBe("new");
+		expect(await readdir(path.join(stateDir, NOTIFICATION_SOUND_DIR_NAME))).toEqual(["ding.wav"]);
 	});
 
 	it("rejects unsupported formats before touching the state dir", async () => {
@@ -91,15 +105,26 @@ describe("notification-sound", () => {
 		expect(await readNotificationSound(stateDir, imported.replace(/x\.wav$/, "x.txt"))).toBeNull();
 	});
 
-	it("refuses to read a sound outside the managed directory", async () => {
+	it("refuses to read a sound outside the managed directory, including through a symlink", async () => {
+		const managed = path.join(stateDir, NOTIFICATION_SOUND_DIR_NAME);
 		const outside = await writeSource("outside.mp3", "leak");
-		expect(isManagedNotificationSoundPath(stateDir, outside)).toBe(false);
-		expect(isManagedNotificationSoundPath(stateDir, path.join(stateDir, NOTIFICATION_SOUND_DIR_NAME))).toBe(false);
-		expect(isManagedNotificationSoundPath(stateDir, path.join(stateDir, NOTIFICATION_SOUND_DIR_NAME, "..", "ui-settings.json"))).toBe(
-			false,
-		);
-		expect(isManagedNotificationSoundPath(stateDir, path.join(stateDir, NOTIFICATION_SOUND_DIR_NAME, "ding.mp3"))).toBe(true);
+		expect(await resolveManagedNotificationSoundPath(stateDir, outside)).toBeNull();
+		expect(await resolveManagedNotificationSoundPath(stateDir, path.join(managed, "..", "ui-settings.json"))).toBeNull();
+
+		const imported = await importNotificationSound(stateDir, await writeSource("ding.mp3", "ok"));
+		expect(await resolveManagedNotificationSoundPath(stateDir, managed)).toBeNull();
+		expect(await resolveManagedNotificationSoundPath(stateDir, imported)).toBe(imported);
+
+		await symlink(outside, path.join(managed, "link.mp3"));
+		expect(await resolveManagedNotificationSoundPath(stateDir, path.join(managed, "link.mp3"))).toBeNull();
+		expect(await readNotificationSound(stateDir, path.join(managed, "link.mp3"))).toBeNull();
 		expect(await readNotificationSound(stateDir, outside)).toBeNull();
+	});
+
+	it("refuses to read a managed file over the size cap", async () => {
+		const imported = await importNotificationSound(stateDir, await writeSource("ok.wav", "ok"));
+		await writeFile(imported, new Uint8Array(MAX_NOTIFICATION_SOUND_BYTES + 1));
+		expect(await readNotificationSound(stateDir, imported)).toBeNull();
 	});
 
 	it("clears the imported sound and tolerates nothing being there", async () => {

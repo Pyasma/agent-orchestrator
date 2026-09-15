@@ -117,6 +117,7 @@ import {
 	NotificationSoundImportError,
 	clearNotificationSound,
 	importNotificationSound,
+	pruneNotificationSounds,
 	readNotificationSound,
 	type NotificationSoundPayload,
 } from "./main/notification-sound";
@@ -2474,10 +2475,30 @@ ipcMain.handle("notificationSound:choose", async (): Promise<NotificationSoundCh
 		const code = error instanceof NotificationSoundImportError ? error.code : "unreadable";
 		return { settings: null, error: code };
 	}
-	const settings = await writeUiSettings(stateDir, { notificationSoundPath: soundPath });
+	// Order matters: copy, persist, then prune. The previous sound survives
+	// until the setting points at the new one, so a failed write leaves the
+	// old file and the old path in agreement.
+	let settings: UiSettings;
+	try {
+		settings = await writeUiSettings(stateDir, { notificationSoundPath: soundPath });
+	} catch (error) {
+		const previous = notificationSoundPath;
+		if (previous === null || path.basename(previous) !== path.basename(soundPath)) await rm(soundPath, { force: true });
+		throw error;
+	}
 	notificationSoundPath = settings.notificationSoundPath;
 	notificationSoundCache = null;
+	await pruneNotificationSounds(stateDir, soundPath);
 	return { settings, error: null };
+});
+// The renderer could not decode or start the custom file. Beep so the
+// notification still makes a sound, and drop the cached bytes so the next
+// notification re-reads (and re-validates) the file instead of replaying a
+// known-bad payload.
+ipcMain.on("notificationSound:playbackFailed", (event) => {
+	if (event.sender !== getShellWebContents()) return;
+	notificationSoundCache = null;
+	shell.beep();
 });
 ipcMain.handle("notificationSound:clear", async (): Promise<UiSettings> => {
 	const runFile = runFilePath();

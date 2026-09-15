@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, realpath, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import type { NotificationSoundImportErrorCode, NotificationSoundPayload } from "../shared/notification-sound";
 
@@ -57,8 +57,14 @@ export function notificationSoundMimeType(filePath: string): string | null {
 }
 
 /**
- * Copy `sourcePath` into the state dir as the active notification sound,
- * replacing any previously imported file. Returns the path of the local copy.
+ * Copy `sourcePath` into the state dir as the active notification sound.
+ * Returns the path of the local copy.
+ *
+ * The copy lands under a temporary name and is renamed into place, so a
+ * replacement with the same basename never overwrites the only good copy
+ * mid-write. Older files are left alone here: the caller prunes them with
+ * {@link pruneNotificationSounds} once the new path has been persisted, so a
+ * failed settings write cannot orphan the setting.
  */
 export async function importNotificationSound(stateDir: string, sourcePath: string): Promise<string> {
 	if (!notificationSoundMimeType(sourcePath)) throw new NotificationSoundImportError("unsupported_type");
@@ -75,30 +81,54 @@ export async function importNotificationSound(stateDir: string, sourcePath: stri
 
 	const dir = path.join(stateDir, NOTIFICATION_SOUND_DIR_NAME);
 	await mkdir(dir, { recursive: true, mode: 0o750 });
-	const name = path.basename(sourcePath);
-	const destination = path.join(dir, name);
-	// Copy before pruning: a failed copy must leave the previous sound (and the
-	// setting still pointing at it) intact rather than deleting it first.
+	const destination = path.join(dir, path.basename(sourcePath));
+	const temp = path.join(dir, `.import-${process.pid}-${Date.now()}${path.extname(destination)}`);
 	try {
-		await copyFile(sourcePath, destination);
+		await copyFile(sourcePath, temp);
+		await rename(temp, destination);
 	} catch {
+		await rm(temp, { force: true });
 		throw new NotificationSoundImportError("unreadable");
-	}
-	// One sound at a time: drop stale copies so a rename never leaves orphans behind.
-	for (const entry of await readdir(dir)) {
-		if (entry !== name) await rm(path.join(dir, entry), { force: true });
 	}
 	return destination;
 }
 
+/** Remove every file in the managed directory except `keepPath`. */
+export async function pruneNotificationSounds(stateDir: string, keepPath: string): Promise<void> {
+	const dir = path.join(stateDir, NOTIFICATION_SOUND_DIR_NAME);
+	let entries: string[];
+	try {
+		entries = await readdir(dir);
+	} catch {
+		return;
+	}
+	const keep = path.basename(keepPath);
+	for (const entry of entries) {
+		if (entry !== keep) await rm(path.join(dir, entry), { force: true });
+	}
+}
+
 /**
- * Whether `soundPath` lives inside `<stateDir>/notification-sound/`. Only the
- * import flow writes there, so anything else in `ui-settings.json` (hand-edited
- * or pushed through `uiSettings:set`) is never read as a sound file.
+ * Resolve `soundPath` to a real file inside `<stateDir>/notification-sound/`,
+ * or `null`. Both sides go through `realpath`, so a symlink planted in the
+ * managed directory cannot point a read outside it. Only the import flow
+ * writes there, so anything else in `ui-settings.json` (hand-edited or pushed
+ * through `uiSettings:set`) is never read as a sound file.
  */
-export function isManagedNotificationSoundPath(stateDir: string, soundPath: string): boolean {
-	const relative = path.relative(path.join(stateDir, NOTIFICATION_SOUND_DIR_NAME), soundPath);
-	return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+export async function resolveManagedNotificationSoundPath(stateDir: string, soundPath: string): Promise<string | null> {
+	let dir: string;
+	let real: string;
+	try {
+		dir = await realpath(path.join(stateDir, NOTIFICATION_SOUND_DIR_NAME));
+		real = await realpath(soundPath);
+	} catch {
+		return null;
+	}
+	const relative = path.relative(dir, real);
+	// Exactly one segment: the file itself, not the dir, not a nested path.
+	if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) return null;
+	if (relative.includes(path.sep)) return null;
+	return real;
 }
 
 /** Remove the imported sound file, if any. Missing files are not an error. */
@@ -108,21 +138,27 @@ export async function clearNotificationSound(stateDir: string): Promise<void> {
 
 /**
  * Read the imported sound for playback. Returns `null` when no custom sound is
- * configured, the path is outside the managed directory, or the file can no
- * longer be read, so callers fall back to the system beep instead of dropping
- * the notification's sound entirely.
+ * configured, the path does not resolve inside the managed directory, the file
+ * is over the import size cap, or it can no longer be read, so callers fall
+ * back to the system beep instead of dropping the notification's sound entirely.
  */
 export async function readNotificationSound(
 	stateDir: string,
 	soundPath: string | null,
 ): Promise<NotificationSoundPayload | null> {
-	if (!soundPath || !isManagedNotificationSoundPath(stateDir, soundPath)) return null;
-	const mimeType = notificationSoundMimeType(soundPath);
+	if (!soundPath) return null;
+	const real = await resolveManagedNotificationSoundPath(stateDir, soundPath);
+	if (!real) return null;
+	const mimeType = notificationSoundMimeType(real);
 	if (!mimeType) return null;
 	try {
+		// The cap is enforced on read as well as import so a file swapped in by
+		// hand can never push an oversized buffer through IPC.
+		const info = await stat(real);
+		if (!info.isFile() || info.size > MAX_NOTIFICATION_SOUND_BYTES) return null;
 		// Copy out of the Node Buffer so IPC's structured clone ships only the file
 		// bytes, never a larger backing slab.
-		return { bytes: new Uint8Array(await readFile(soundPath)), mimeType };
+		return { bytes: new Uint8Array(await readFile(real)), mimeType };
 	} catch {
 		return null;
 	}

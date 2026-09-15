@@ -562,6 +562,7 @@ const api = {
 		choose: () => ipcRenderer.invoke("notificationSound:choose") as Promise<NotificationSoundChooseResult>,
 		clear: () => ipcRenderer.invoke("notificationSound:clear") as Promise<UiSettings>,
 		preview: () => ipcRenderer.invoke("notificationSound:preview") as Promise<void>,
+		reportPlaybackFailure: () => ipcRenderer.send("notificationSound:playbackFailed"),
 		onPlay: (listener: (payload: NotificationSoundPayload) => void) => {
 			const wrapped = (_event: Electron.IpcRendererEvent, payload: NotificationSoundPayload) => listener(payload);
 			ipcRenderer.on("notifications:playSound", wrapped);

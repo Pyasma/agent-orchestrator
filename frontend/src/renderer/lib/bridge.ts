@@ -232,6 +232,7 @@ export const aoBridge: AoBridge =
 			choose: async () => ({ settings: null, error: null }),
 			clear: async () => ({ ...DEFAULT_UI_SETTINGS }),
 			preview: async () => undefined,
+			reportPlaybackFailure: () => undefined,
 			onPlay: () => () => undefined,
 		},
 		keybindings: {

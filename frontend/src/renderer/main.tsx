@@ -28,7 +28,9 @@ const router = createAppRouter(queryClient);
 aoBridge.telemetry.onClearQueues(clearRendererTelemetryQueues);
 // Main decides *when* a notification sound plays; the renderer only supplies the
 // speakers for a custom sound file (see main/notification-sound.ts).
-aoBridge.notificationSound.onPlay(playNotificationSound);
+aoBridge.notificationSound.onPlay((payload) => {
+	playNotificationSound(payload, () => aoBridge.notificationSound.reportPlaybackFailure());
+});
 aoBridge.telemetry.onPolicy((view) => applyRendererTelemetryPolicy(view.eventsEnabled && view.acknowledged && view.state === "applied"));
 
 if (import.meta.env.DEV) {
