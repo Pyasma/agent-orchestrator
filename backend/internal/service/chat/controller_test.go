@@ -102,6 +102,22 @@ type nativeHistoryConversation struct {
 	onRead func(int)
 }
 
+// rejectedHistoryConversation is an ACP-like reader whose provider refuses
+// every session/load replay after an unsettled first observation.
+type rejectedHistoryConversation struct {
+	*fakeConversation
+	refreshes atomic.Int32
+}
+
+func (c *rejectedHistoryConversation) ReadHistory(context.Context) ([]ports.ChatEvent, error) {
+	return nil, ports.ErrChatHistoryUnsettled
+}
+
+func (c *rejectedHistoryConversation) RefreshHistory(context.Context) ([]ports.ChatEvent, error) {
+	c.refreshes.Add(1)
+	return nil, fmt.Errorf("refresh ACP session history: %w", ports.ErrChatHistoryLoadRejected)
+}
+
 type convergingHistoryConversation struct {
 	*fakeConversation
 	mu             sync.Mutex
@@ -1408,6 +1424,35 @@ func TestInterfaceHandoffRefreshesNativeHistoryUntilItReachesTheCheckpoint(t *te
 	if len(snapshot.Messages) != 2 || snapshot.Messages[0].Text != "Run the final verification." ||
 		snapshot.Messages[1].Text != "The final verification passed." {
 		t.Fatalf("messages = %#v, want refreshed checkpoint transcript", snapshot.Messages)
+	}
+}
+
+// A provider that rejects the replay outright must end the settle wait on the
+// first refresh instead of polling until nativeHistorySettleLimit.
+func TestInterfaceHandoffStopsPollingWhenProviderRejectsHistoryLoad(t *testing.T) {
+	st := openStore(t)
+	conv := &rejectedHistoryConversation{fakeConversation: newFakeConversation()}
+	svc := chatsvc.New(chatsvc.Options{
+		Store: st, Sessions: st,
+		Drivers: fakeRegistry{driver: fakeDriver{conv: conv}},
+		Log:     slog.New(slog.DiscardHandler),
+		NewID:   func() string { return fmt.Sprintf("load-rejected-%d", time.Now().UnixNano()) },
+	})
+	t.Cleanup(func() { _ = svc.Stop(context.Background(), testSession) })
+
+	started := time.Now()
+	_, err := svc.Start(context.Background(), chatsvc.StartConfig{
+		SessionID: testSession, ProjectID: testProject, Harness: domain.HarnessClaudeCode,
+		WorkspacePath: t.TempDir(), ProviderConversationID: "thread-1", HistoryMode: ports.ChatHistoryRequired,
+	})
+	if !errors.Is(err, ports.ErrChatHistoryLoadRejected) {
+		t.Fatalf("Start error = %v, want ErrChatHistoryLoadRejected", err)
+	}
+	if got := conv.refreshes.Load(); got != 1 {
+		t.Fatalf("refreshes = %d, want exactly one rejected provider observation", got)
+	}
+	if elapsed := time.Since(started); elapsed > 20*time.Second {
+		t.Fatalf("settle wait took %v, want an early exit well under the 45s settle limit", elapsed)
 	}
 }
 

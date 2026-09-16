@@ -78,6 +78,13 @@ var (
 	// ErrChatCapabilityUnavailable means an explicit tuning value was requested
 	// but the provider did not advertise the matching live capability.
 	ErrChatCapabilityUnavailable = errors.New("chat model capability unavailable")
+	// ErrChatHistoryLoadRejected means the provider refused to replay its own
+	// transcript: the ACP session/load answered with a provider-side failure such
+	// as JSON-RPC -32603 "Internal error" carrying its own "context deadline
+	// exceeded". The provider, not an unsettled AO checkpoint, is what failed, so
+	// re-sending the same load until AO's settle budget expires cannot make
+	// progress. Callers must stop polling and surface the provider failure.
+	ErrChatHistoryLoadRejected = errors.New("chat conversation history load was rejected by the provider")
 )
 
 // ChatHistoryMismatchDimension identifies the exact durable checkpoint fact a

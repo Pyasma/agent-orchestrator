@@ -660,6 +660,8 @@ type fakeAgent struct {
 	loadUpdateBatches   [][]acpsdk.SessionUpdate
 	blockLoadCall       int
 	loadStarted         chan struct{}
+	failLoadFrom        int   // LoadSession calls >= this number return failLoadErr
+	failLoadErr         error // the SDK coerces a plain error into -32603
 	loadCalls           int
 	resumeCalls         int
 	promptParams        acpsdk.PromptRequest
@@ -920,7 +922,12 @@ func (a *fakeAgent) LoadSession(ctx context.Context, params acpsdk.LoadSessionRe
 	}
 	block := a.blockLoadCall == loadCall
 	started := a.loadStarted
+	failLoad := a.failLoadFrom > 0 && loadCall >= a.failLoadFrom
+	failLoadErr := a.failLoadErr
 	a.mu.Unlock()
+	if failLoad {
+		return acpsdk.LoadSessionResponse{}, failLoadErr
+	}
 	if block {
 		if started != nil {
 			close(started)
@@ -1725,6 +1732,103 @@ func TestACPDriverHistoryRefreshHonorsCancellation(t *testing.T) {
 	cancel()
 	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Fatalf("RefreshHistory error = %v, want context cancellation", err)
+	}
+}
+
+// A provider that answers session/load with -32603 (Claude Code's own "context
+// deadline exceeded") has refused the replay; the refresh must surface a
+// dedicated error rather than a generic one the settle loop keeps polling.
+func TestACPDriverHistoryRefreshMapsProviderInternalErrorToLoadRejected(t *testing.T) {
+	userID := "11111111-1111-4111-8111-111111111111"
+	user := acpsdk.UpdateUserMessageText("Inspect the repository")
+	user.UserMessageChunk.MessageId = &userID
+	agent := &fakeAgent{
+		capabilities: &acpsdk.AgentCapabilities{LoadSession: true},
+		loadUpdates:  []acpsdk.SessionUpdate{user},
+		failLoadFrom: 2,
+		failLoadErr:  context.DeadlineExceeded,
+	}
+	driver := New(Config{
+		Harness:      domain.HarnessClaudeCode,
+		Capabilities: ports.ChatCapabilities{ports.ChatCapabilityStreaming: true},
+		Probe:        func(context.Context) error { return nil },
+		Launch:       func(context.Context, LaunchConfig) (Launch, error) { return Launch{Command: "fake"}, nil },
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	driver.useTestProcess(fakeSpawn(agent))
+
+	conv, err := driver.Resume(context.Background(), ports.ChatResumeConfig{
+		ProviderConversationID: "provider-session-1",
+		WorkspacePath:          t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	defer conv.Close()
+
+	_, err = conv.(ports.ChatHistoryRefresher).RefreshHistory(context.Background())
+	if !errors.Is(err, ports.ErrChatHistoryLoadRejected) {
+		t.Fatalf("RefreshHistory error = %v, want ErrChatHistoryLoadRejected", err)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("RefreshHistory error = %v, provider's own deadline must not read as AO's", err)
+	}
+	var requestErr *acpsdk.RequestError
+	if !errors.As(err, &requestErr) || requestErr.Code != -32603 {
+		t.Fatalf("RefreshHistory error = %v, want the provider's -32603 preserved", err)
+	}
+	if !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Fatalf("RefreshHistory error = %v, want the provider detail preserved", err)
+	}
+}
+
+// The initial resume load takes the same mapping so a transition that fails
+// before the first refresh also reports the rejection.
+func TestACPDriverResumeMapsProviderInternalLoadErrorToLoadRejected(t *testing.T) {
+	agent := &fakeAgent{
+		capabilities: &acpsdk.AgentCapabilities{LoadSession: true},
+		failLoadFrom: 1,
+		failLoadErr:  errors.New("transcript replay failed"),
+	}
+	driver := New(Config{
+		Harness:      domain.HarnessClaudeCode,
+		Capabilities: ports.ChatCapabilities{ports.ChatCapabilityStreaming: true},
+		Probe:        func(context.Context) error { return nil },
+		Launch:       func(context.Context, LaunchConfig) (Launch, error) { return Launch{Command: "fake"}, nil },
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	driver.useTestProcess(fakeSpawn(agent))
+
+	_, err := driver.Resume(context.Background(), ports.ChatResumeConfig{
+		ProviderConversationID: "provider-session-1",
+		WorkspacePath:          t.TempDir(),
+	})
+	if !errors.Is(err, ports.ErrChatResumeFailed) || !errors.Is(err, ports.ErrChatHistoryLoadRejected) {
+		t.Fatalf("Resume error = %v, want ErrChatResumeFailed wrapping ErrChatHistoryLoadRejected", err)
+	}
+}
+
+func TestNormalizeACPLoadErrorKeepsOtherCodes(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want error
+	}{
+		{name: "auth required", err: acpsdk.NewAuthRequired(nil), want: ports.ErrChatAuthRequired},
+		{name: "internal", err: acpsdk.NewInternalError(map[string]any{"error": "context deadline exceeded"}), want: ports.ErrChatHistoryLoadRejected},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := normalizeACPLoadError("ACP session/load", tt.err)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("normalizeACPLoadError = %v, want %v", err, tt.want)
+			}
+		})
+	}
+	plain := errors.New("peer disconnected before response")
+	if err := normalizeACPLoadError("ACP session/load", plain); errors.Is(err, ports.ErrChatHistoryLoadRejected) || !errors.Is(err, plain) {
+		t.Fatalf("normalizeACPLoadError(plain) = %v, want the transport error untouched", err)
+	}
+	if err := normalizeACPError("ACP session/prompt", acpsdk.NewInternalError(nil)); errors.Is(err, ports.ErrChatHistoryLoadRejected) {
+		t.Fatalf("normalizeACPError(prompt -32603) = %v, must not read as a history load rejection", err)
 	}
 }
 
