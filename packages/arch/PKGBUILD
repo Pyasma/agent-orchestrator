@@ -1,7 +1,7 @@
 # Maintainer: Agent Orchestrator <https://github.com/Untrivial-ai/agent-orchestrator>
 
 pkgname=agent-orchestrator-bin
-pkgver=0.12.12
+pkgver=0.13.0
 pkgrel=1
 pkgdesc="Orchestrate coding agents across parallel sessions and worktrees"
 arch=('x86_64')
@@ -35,7 +35,7 @@ conflicts=('agent-orchestrator' 'agent-orchestrator-appimage')
 # there are no separate debug symbols to split out.
 options=('!strip' '!debug' '!emptydirs')
 source=("${pkgname}-${pkgver}.deb::${url}/releases/download/v${pkgver}/agent-orchestrator-linux-x64.deb")
-sha256sums=('e89d18de5b10bf85a51dcf2927d08274b3ae02d7ab65c901d7df601b9f64e00e')
+sha256sums=('5cc7a6d68a18d651b0566431c4ce293a241ce8493e76f70fc245f15b79451e14')
 
 # The upstream deb already lays out /usr the way Arch wants it, so this repacks
 # rather than rebuilds. Three things it does not carry are added below.

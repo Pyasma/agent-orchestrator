@@ -1,6 +1,6 @@
 pkgbase = agent-orchestrator-bin
 	pkgdesc = Orchestrate coding agents across parallel sessions and worktrees
-	pkgver = 0.12.12
+	pkgver = 0.13.0
 	pkgrel = 1
 	url = https://github.com/Untrivial-ai/agent-orchestrator
 	arch = x86_64
@@ -30,7 +30,7 @@ pkgbase = agent-orchestrator-bin
 	options = !strip
 	options = !debug
 	options = !emptydirs
-	source = agent-orchestrator-bin-0.12.12.deb::https://github.com/Untrivial-ai/agent-orchestrator/releases/download/v0.12.12/agent-orchestrator-linux-x64.deb
-	sha256sums = e89d18de5b10bf85a51dcf2927d08274b3ae02d7ab65c901d7df601b9f64e00e
+	source = agent-orchestrator-bin-0.13.0.deb::https://github.com/Untrivial-ai/agent-orchestrator/releases/download/v0.13.0/agent-orchestrator-linux-x64.deb
+	sha256sums = 5cc7a6d68a18d651b0566431c4ce293a241ce8493e76f70fc245f15b79451e14
 
 pkgname = agent-orchestrator-bin
