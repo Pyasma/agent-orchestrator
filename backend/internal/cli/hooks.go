@@ -386,7 +386,7 @@ var reviewerSubmitCommandPattern = regexp.MustCompile(`^printf '%s' ` + reviewer
 	`|ao review submit --session (?P<session>[A-Za-z0-9_-]+) --reviews -)$`)
 
 const reviewerPermissionDenyMessage = "AO headless reviewer: no human can answer permission prompts. " +
-	"Use only the allowlisted read commands (git diff/log/show/status, gh, Read, Grep, Glob) " +
+	"Use only the allowlisted read commands (git diff/log/show/status, gh pr view/diff/checks, Read, Grep, Glob) " +
 	"and the exact single-line `printf '%s' '<json>' | ...` submit commands from the review task."
 
 // reviewerPermissionDecision answers a Claude Code reviewer's PermissionRequest:
