@@ -327,6 +327,20 @@ let pendingBounce: { id: number; critical: boolean } | null = null;
 // uiSettings:set handler so a toggle flip takes effect without an app restart.
 let soundNotificationsEnabled = DEFAULT_UI_SETTINGS.soundNotificationsEnabled;
 
+// Plays the bundled notification sound through the renderer (main has no
+// audio output). `shell.beep()` is only the fallback for when no shell is
+// alive to play it: on Linux it is a silent no-op for desktop-launched apps
+// (Electron writes `\a` to /dev/console or /dev/tty, neither of which such an
+// app can open), which is why the renderer owns playback (#5514).
+function playNotificationSound(): void {
+	const shellContents = getShellWebContents();
+	if (shellContents && !shellContents.isDestroyed()) {
+		shellContents.send("notifications:playSound");
+		return;
+	}
+	shell.beep();
+}
+
 const isDev = !app.isPackaged;
 
 // Dev mode uses a separate port and state subdirectory so it never collides with
@@ -2452,10 +2466,17 @@ ipcMain.handle(
 			}
 		}
 		if (shouldSignalAttention(notification.type) && soundNotificationsEnabled) {
-			shell.beep();
+			playNotificationSound();
 		}
 	},
 );
+
+// The renderer could not decode or start the bundled sound. Beep so the
+// notification still makes a sound where the OS beep works at all.
+ipcMain.on("notifications:soundFailed", (event) => {
+	if (event.sender !== getShellWebContents()) return;
+	shell.beep();
+});
 
 // Dev-only: force attention signal regardless of window focus (for testing)
 if (!app.isPackaged) {
@@ -2473,7 +2494,7 @@ if (!app.isPackaged) {
 			}, 2000);
 		}
 		if (soundNotificationsEnabled) {
-			shell.beep();
+			playNotificationSound();
 		}
 	});
 }

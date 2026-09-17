@@ -551,6 +551,14 @@ const api = {
 				ipcRenderer.off("notifications:click", wrapped);
 			};
 		},
+		onPlaySound: (listener: () => void) => {
+			const wrapped = () => listener();
+			ipcRenderer.on("notifications:playSound", wrapped);
+			return () => {
+				ipcRenderer.off("notifications:playSound", wrapped);
+			};
+		},
+		reportSoundFailure: () => ipcRenderer.send("notifications:soundFailed"),
 	},
 	tray: {
 		setAttentionState: (state: TrayAttentionState) => ipcRenderer.send(TRAY_SET_ATTENTION_STATE_CHANNEL, state),
