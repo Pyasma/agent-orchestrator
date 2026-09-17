@@ -68,12 +68,23 @@ function createAutoUpdaterMock(): AutoUpdaterMock {
 // race outright rather than trying to time it.
 let stateDir = "";
 const hostPlatform = Object.getOwnPropertyDescriptor(process, "platform")!;
+// The Linux install preflight reads process.execPath, and under vitest that is
+// the host node binary. A distro node lives in root-owned /usr/bin, which
+// looks exactly like a package-managed install and would switch every updater
+// path off. Pointing execPath into the per-test state dir keeps the suite
+// hermetic; tests that want the blocker stub a read-only path themselves.
+const hostExecPath = Object.getOwnPropertyDescriptor(process, "execPath")!;
 beforeEach(() => {
   Object.defineProperty(process, "platform", { value: "linux" });
   stateDir = mkdtempSync(nodePath.join(os.tmpdir(), "ao-updater-state-"));
+  Object.defineProperty(process, "execPath", {
+    value: nodePath.join(stateDir, "agent-orchestrator"),
+    configurable: true,
+  });
 });
 afterEach(() => {
   Object.defineProperty(process, "platform", hostPlatform);
+  Object.defineProperty(process, "execPath", hostExecPath);
   rmSync(stateDir, { recursive: true, force: true });
 });
 
@@ -3965,6 +3976,25 @@ it("keeps timed-out native preparation non-installable even after a late event",
     expect(module.getUpdateStatus().state).toBe("error");
   } finally { restore(); vi.useRealTimers(); }
 });
+// makePackagedInstall stands in for a deb/rpm/Arch install: the app sits in a
+// directory the user cannot write to, and there is no APPIMAGE. Returns the
+// cleanup that restores process and removes the tree.
+function makePackagedInstall(): () => void {
+  const root = mkdtempSync(nodePath.join(os.tmpdir(), "ao-updater-pkg-"));
+  const appDir = nodePath.join(root, "agent-orchestrator");
+  mkdirSync(appDir, { recursive: true });
+  chmodSync(appDir, 0o555);
+  const restore = stubProcess("linux", nodePath.join(appDir, "agent-orchestrator"));
+  const originalAppImage = process.env.APPIMAGE;
+  delete process.env.APPIMAGE;
+  return () => {
+    if (originalAppImage !== undefined) process.env.APPIMAGE = originalAppImage;
+    restore();
+    chmodSync(appDir, 0o755);
+    rmSync(root, { recursive: true, force: true });
+  };
+}
+
 describe("getLinuxInstallBlocker", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -3974,19 +4004,51 @@ describe("getLinuxInstallBlocker", () => {
   // A deb/rpm/Arch install lives under root-owned /usr, so electron-updater
   // would download a build it can never write into place.
   it("blocks installs from an app directory the user cannot write to", async () => {
-    const root = mkdtempSync(nodePath.join(os.tmpdir(), "ao-updater-pkg-"));
-    const appDir = nodePath.join(root, "agent-orchestrator");
-    mkdirSync(appDir, { recursive: true });
-    chmodSync(appDir, 0o555);
-    const restore = stubProcess("linux", nodePath.join(appDir, "agent-orchestrator"));
-    delete process.env.APPIMAGE;
+    const cleanup = makePackagedInstall();
     try {
       const { module } = await importAutoUpdater();
       expect(module.getLinuxInstallBlocker()).toContain("package manager");
     } finally {
-      restore();
-      chmodSync(appDir, 0o755);
-      rmSync(root, { recursive: true, force: true });
+      cleanup();
+    }
+  });
+
+  // The settings IPC handler reaches checkForUpdatesNow without passing through
+  // startAutoUpdates, so the manual check must refuse on its own — before any
+  // feed request, and before an "available" status invites a download.
+  it("refuses a manual check before touching the feed", async () => {
+    const cleanup = makePackagedInstall();
+    try {
+      const { module, autoUpdater } = await importAutoUpdater();
+      await module.checkForUpdatesNow(stateDir, { requestId: "manual" });
+      expect(autoUpdater.checkForUpdates).not.toHaveBeenCalled();
+      expect(autoUpdater.downloadUpdate).not.toHaveBeenCalled();
+      expect(module.getUpdateStatus()).toMatchObject({
+        state: "unsupported",
+        message: expect.stringContaining("package manager"),
+        requestId: "manual",
+      });
+    } finally {
+      cleanup();
+    }
+  });
+
+  // The sidebar and Settings download buttons call downloadUpdateNow directly.
+  // Refusing there keeps a ~180MB download from landing only to be rejected by
+  // quitAndInstallUpdate afterwards.
+  it("refuses a manual download before starting it", async () => {
+    const cleanup = makePackagedInstall();
+    try {
+      const { module, autoUpdater } = await importAutoUpdater();
+      await module.downloadUpdateNow("manual");
+      expect(autoUpdater.downloadUpdate).not.toHaveBeenCalled();
+      expect(module.getUpdateStatus()).toMatchObject({
+        state: "unsupported",
+        message: expect.stringContaining("package manager"),
+        requestId: "manual",
+      });
+    } finally {
+      cleanup();
     }
   });
 
@@ -4040,12 +4102,7 @@ describe("getLinuxInstallBlocker", () => {
   it("keeps the periodic check off after a settings change or manual check", async () => {
     vi.useFakeTimers();
     const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
-    const root = mkdtempSync(nodePath.join(os.tmpdir(), "ao-updater-pkg-"));
-    const appDir = nodePath.join(root, "agent-orchestrator");
-    mkdirSync(appDir, { recursive: true });
-    chmodSync(appDir, 0o555);
-    const restore = stubProcess("linux", nodePath.join(appDir, "agent-orchestrator"));
-    delete process.env.APPIMAGE;
+    const cleanup = makePackagedInstall();
     let current: UpdateSettings = {
       enabled: false,
       channel: "latest",
@@ -4072,18 +4129,15 @@ describe("getLinuxInstallBlocker", () => {
         nightlyAck: true,
       });
       await module.checkForUpdatesNow(stateDir);
-      const manualChecks = autoUpdater.checkForUpdates.mock.calls.length;
 
       await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1000);
-      expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(manualChecks);
+      expect(autoUpdater.checkForUpdates).not.toHaveBeenCalled();
       expect(
         setIntervalSpy.mock.calls.some(([, delay]) => delay === 15 * 60 * 1000 || delay === 60 * 60 * 1000),
       ).toBe(false);
     } finally {
-      restore();
       vi.useRealTimers();
-      chmodSync(appDir, 0o755);
-      rmSync(root, { recursive: true, force: true });
+      cleanup();
     }
   });
 });

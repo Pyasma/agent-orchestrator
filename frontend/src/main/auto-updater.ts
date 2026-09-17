@@ -1957,6 +1957,7 @@ export async function checkForUpdatesNow(
     });
     return;
   }
+  if (refuseManualUpdateOnPackagedInstall(options.requestId)) return;
   // Which phase a failure came from. The queue clears global operation state in
   // its own `finally` before this function's catch runs, and a queued operation
   // can reset the module-level phase, so the distinction is captured locally
@@ -2129,6 +2130,7 @@ export async function downloadUpdateNow(requestId?: string): Promise<void> {
     });
     return;
   }
+  if (refuseManualUpdateOnPackagedInstall(requestId)) return;
   manualDownloadPending = true;
   broadcast({ state: "downloading", version, requestId });
   try {
@@ -2251,6 +2253,27 @@ export function getLinuxInstallBlocker(): string | undefined {
     );
   }
   return undefined;
+}
+
+// refuseManualUpdateOnPackagedInstall is the guard both manual entry points
+// (Settings "check now" and the download buttons) run before touching the feed.
+// startAutoUpdates only covers the timer; the settings IPC handler reaches
+// checkForUpdatesNow directly, and the sidebar reaches downloadUpdateNow, so
+// without this a package-managed install still hit the feed and could pull a
+// ~180MB build that quitAndInstallUpdate then refused. Refusing up front
+// reports the package-manager guidance instead of a "downloaded" build that
+// can never install. Returns true when the caller must stop.
+function refuseManualUpdateOnPackagedInstall(requestId?: string): boolean {
+  const blocker = getLinuxInstallBlocker();
+  if (blocker === undefined) return false;
+  emitUpdateOutcome({
+    event: "ao.renderer.update_unsupported",
+    phase: activeUpdaterPhase,
+    trigger: activeUpdateTrigger(),
+    error_category: "not_supported",
+  });
+  broadcast({ state: "unsupported", message: blocker, requestId });
+  return true;
 }
 
 // getInstallBlocker is the platform-dispatching preflight the install paths ask.
