@@ -1749,6 +1749,7 @@ func TestHooks_ReviewerPermissionRequestAnswersInsteadOfBlocking(t *testing.T) {
 		{"ao review submit pipe", `{"tool_name":"Bash","tool_input":{"command":"printf '%s' ` + submitJSON + ` | ao review submit --session worker-7 --reviews -"}}`, "allow"},
 		{"gh api review post", `{"tool_name":"Bash","tool_input":{"command":"printf '%s' '{ \"event\": \"COMMENT\", \"body\": \"ok\" }' | gh api --method POST repos/acme/app/pulls/12/reviews --input - --jq '.id'"}}`, "allow"},
 		{"other worker session", `{"tool_name":"Bash","tool_input":{"command":"printf '%s' '{}' | ao review submit --session worker-9 --reviews -"}}`, "deny"},
+		{"unset worker session id", `{"tool_name":"Bash","tool_input":{"command":"printf '%s' '{}' | ao review submit --session worker-7 --reviews -"}}`, "deny"},
 		{"command substitution in operand", `{"tool_name":"Bash","tool_input":{"command":"printf '%s' '{}'$(id) | ao review submit --session worker-7 --reviews -"}}`, "deny"},
 		{"heredoc submit", `{"tool_name":"Bash","tool_input":{"command":"cat > /tmp/r.json <<'EOF'\n{}\nEOF\nao review submit --session worker-7 --reviews - < /tmp/r.json"}}`, "deny"},
 		{"env inspection", `{"tool_name":"Bash","tool_input":{"command":"pip3 show pkg | sed -n 1p; cat \"$(pip3 show pkg)\" || python3 -c \"print(1)\""}}`, "deny"},
@@ -1758,6 +1759,9 @@ func TestHooks_ReviewerPermissionRequestAnswersInsteadOfBlocking(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("AO_REVIEW_SESSION_ID", "review-7")
 			t.Setenv("AO_REVIEW_WORKER_SESSION_ID", "worker-7")
+			if tc.name == "unset worker session id" {
+				t.Setenv("AO_REVIEW_WORKER_SESSION_ID", "")
+			}
 			t.Setenv("AO_REVIEW_HARNESS", "claude-code")
 			cfg := setConfigEnv(t)
 			srv, capture := activityServer(t, http.StatusOK, `{"ok":true}`)

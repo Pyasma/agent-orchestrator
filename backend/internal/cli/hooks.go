@@ -378,7 +378,9 @@ type claudePermissionHookOutput struct {
 // rules never match such commands, so the headless reviewer would hang. The
 // shape is safe to auto-allow: `printf '%s'` performs no format interpretation
 // and a single-quoted operand (quote-backslash-quote-quote for embedded single
-// quotes, as the prompt instructs) cannot expand or run anything. The worker session id is pinned per-launch in the pattern.
+// quotes, as the prompt instructs) cannot expand or run anything. The
+// captured session id is checked against AO_REVIEW_WORKER_SESSION_ID after the
+// match.
 const reviewerSubmitJSONLiteral = `'[^']*(?:'\\''[^']*)*'`
 
 var reviewerSubmitCommandPattern = regexp.MustCompile(`^printf '%s' ` + reviewerSubmitJSONLiteral + ` \| (?:` +
@@ -411,7 +413,9 @@ func reviewerPermissionDecision(payload []byte, workerSessionID string) claudePe
 	if m == nil {
 		return out
 	}
-	if session := m[reviewerSubmitCommandPattern.SubexpIndex("session")]; session != "" && session != workerSessionID {
+	if session := m[reviewerSubmitCommandPattern.SubexpIndex("session")]; session != "" && (workerSessionID == "" || session != workerSessionID) {
+		// An unset AO_REVIEW_WORKER_SESSION_ID must not admit a submit for any
+		// worker; the launcher always sets it, so empty means a broken launch.
 		return out
 	}
 	out.HookSpecificOutput.Decision.Behavior = "allow"
