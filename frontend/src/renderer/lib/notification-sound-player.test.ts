@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../assets/notification.wav", () => ({ default: "/assets/notification.wav" }));
+vi.mock("../assets/notification.mp3", () => ({ default: "/assets/notification.mp3" }));
 
 import { playNotificationSound } from "./notification-sound-player";
 
@@ -38,7 +38,7 @@ describe("playNotificationSound", () => {
 		const onFailure = vi.fn();
 		playNotificationSound(onFailure);
 		await Promise.resolve();
-		expect(audio.src).toBe("/assets/notification.wav");
+		expect(audio.src).toBe("/assets/notification.mp3");
 		expect(onFailure).not.toHaveBeenCalled();
 	});
 

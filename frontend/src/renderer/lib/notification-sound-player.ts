@@ -1,4 +1,4 @@
-import notificationSoundUrl from "../assets/notification.wav";
+import notificationSoundUrl from "../assets/notification.mp3";
 
 /**
  * Play the bundled notification sound. Electron's main process has no audio
