@@ -2254,6 +2254,7 @@ export async function returnToHome(
     });
     return;
   }
+  if (refuseManualUpdateOnPackagedInstall(requestId)) return;
   // See checkForUpdatesNow: boxed so the closure assignment is visible here.
   const failed: { phase: UpdatePhase } = { phase: "check" };
   try {
@@ -2443,8 +2444,9 @@ export function getLinuxInstallBlocker(): string | undefined {
   return undefined;
 }
 
-// refuseManualUpdateOnPackagedInstall is the guard both manual entry points
-// (Settings "check now" and the download buttons) run before touching the feed.
+// refuseManualUpdateOnPackagedInstall is the guard every manual entry point
+// (Settings "check now", the download buttons, and "return to home channel")
+// runs before touching the feed.
 // startAutoUpdates only covers the timer; the settings IPC handler reaches
 // checkForUpdatesNow directly, and the sidebar reaches downloadUpdateNow, so
 // without this a package-managed install still hit the feed and could pull a

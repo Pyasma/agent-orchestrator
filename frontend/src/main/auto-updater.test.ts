@@ -4214,6 +4214,31 @@ describe("getLinuxInstallBlocker", () => {
     }
   });
 
+  // returnToHome clears a feature pin and checks the home channel in one go; a
+  // stale staged build there forces autoDownload, so it must refuse up front
+  // like the other manual entry points.
+  it("refuses a return-to-home check before touching the feed", async () => {
+    const cleanup = makePackagedInstall();
+    try {
+      const { module, autoUpdater } = await importAutoUpdater({
+        enabled: true,
+        channel: "latest",
+        nightlyAck: false,
+        feature: { pr: 123 },
+      });
+      await module.returnToHome(stateDir, "manual");
+      expect(autoUpdater.checkForUpdates).not.toHaveBeenCalled();
+      expect(autoUpdater.downloadUpdate).not.toHaveBeenCalled();
+      expect(module.getUpdateStatus()).toMatchObject({
+        state: "unsupported",
+        message: expect.stringContaining("package manager"),
+        requestId: "manual",
+      });
+    } finally {
+      cleanup();
+    }
+  });
+
   // The sidebar and Settings download buttons call downloadUpdateNow directly.
   // Refusing there keeps a ~180MB download from landing only to be rejected by
   // quitAndInstallUpdate afterwards.
