@@ -413,9 +413,9 @@ func reviewerPermissionDecision(payload []byte, workerSessionID string) claudePe
 	if m == nil {
 		return out
 	}
-	if session := m[reviewerSubmitCommandPattern.SubexpIndex("session")]; session != "" && (workerSessionID == "" || session != workerSessionID) {
-		// An unset AO_REVIEW_WORKER_SESSION_ID must not admit a submit for any
-		// worker; the launcher always sets it, so empty means a broken launch.
+	if session := m[reviewerSubmitCommandPattern.SubexpIndex("session")]; workerSessionID == "" || (session != "" && session != workerSessionID) {
+		// An unset AO_REVIEW_WORKER_SESSION_ID means a broken launch (the
+		// launcher always sets it); admit nothing rather than any worker.
 		return out
 	}
 	out.HookSpecificOutput.Decision.Behavior = "allow"
