@@ -2075,20 +2075,25 @@ async function requestAutomaticUpdateCheck(
 // Caller guards on app.isPackaged.
 export async function startAutoUpdates(stateDir: string): Promise<void> {
   escalationStateDir = stateDir;
+  // The retirement poll runs on every install kind, blocked or not. It is a
+  // settings reconcile, not an update: a user who pinned a pr<N> build and
+  // then moved to a system package would otherwise keep that pin, and the
+  // dead pr<N> channel in saved settings, with nothing ever clearing it.
+  startRetirementPollTimer(stateDir);
   // A package-managed install can never apply what a check would find, so the
   // check itself is waste: a periodic timer plus a ~180MB download, discarded.
-  // Set before the guard: the escalation paths read it regardless of whether
-  // this process goes on to check. Nothing was ever staged from here either, so
-  // the staged-build restore is skipped along with the check. The periodic
-  // timer is refused again in schedulePeriodicAutomaticUpdateCheck, which
-  // covers the settings-change and manual-check paths that never pass here.
+  // escalationStateDir is set before the guard: the escalation paths read it
+  // regardless of whether this process goes on to check. Nothing was ever
+  // staged from here either, so the staged-build restore is skipped along with
+  // the check. The periodic timer is refused again in
+  // schedulePeriodicAutomaticUpdateCheck, which covers the settings-change and
+  // manual-check paths that never pass here.
   const blocker = getLinuxInstallBlocker();
   if (blocker !== undefined) {
     console.info("auto-updates disabled:", blocker);
     return;
   }
   restoreStagedBuild(stateDir);
-  startRetirementPollTimer(stateDir);
   const intervalMs = await requestAutomaticUpdateCheck(stateDir);
   if (intervalMs !== undefined)
     schedulePeriodicAutomaticUpdateCheck(stateDir, intervalMs);

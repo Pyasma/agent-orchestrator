@@ -4302,6 +4302,46 @@ describe("getLinuxInstallBlocker", () => {
     }
   });
 
+  // The retirement poll is a settings reconcile, not an update, so it still
+  // runs on a package-managed install: a pr<N> pin carried over from an
+  // AppImage would otherwise never clear.
+  it("still clears a retired feature pin on a package-managed install", async () => {
+    vi.useFakeTimers();
+    const cleanup = makePackagedInstall();
+    let current: UpdateSettings = {
+      enabled: true,
+      channel: "latest",
+      nightlyAck: false,
+      feature: { pr: 123 },
+    };
+    try {
+      const { module, autoUpdater, writeUpdateSettings, updateUpdateSettings } = await importAutoUpdater(
+        vi.fn(() => Promise.resolve(current)),
+        {
+          reconcileFeaturePin: (settings: UpdateSettings) =>
+            Promise.resolve({ settings: { ...settings, feature: null }, cleared: true }),
+        },
+      );
+      writeUpdateSettings.mockImplementation(async (_stateDir: string, next: UpdateSettings) => {
+        current = next;
+      });
+      updateUpdateSettings.mockImplementation(
+        async (_stateDir: string, fn: (s: UpdateSettings) => UpdateSettings | Promise<UpdateSettings>) => {
+          current = await fn(current);
+          return current;
+        },
+      );
+
+      await module.startAutoUpdates(stateDir);
+      await vi.advanceTimersByTimeAsync(30 * 60 * 1000);
+      expect(current.feature).toBeNull();
+      expect(autoUpdater.checkForUpdates).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      cleanup();
+    }
+  });
+
   // startAutoUpdates refusing the timer is not enough on its own: a settings
   // change or a manual check re-arms the periodic scheduler through
   // reconcileAutomaticUpdateSchedule, which never goes through startAutoUpdates.
