@@ -31,7 +31,6 @@ import { cn } from "../lib/utils";
 import { SHELL_PANEL_SPRING } from "../lib/motion-spring";
 import { useWindowFullScreen } from "../hooks/useWindowFullScreen";
 import { StatusPill } from "./StatusPill";
-import { AppMemoryIndicator } from "./SessionMemoryPanel";
 import { TopbarActionError, TopbarButton, topbarHeaderClass, topbarProjectLabelClass } from "./TopbarButton";
 import { SessionTerminationPopover } from "./SessionTerminationPopover";
 import { TopbarOpenEditorButton } from "./TopbarOpenEditorButton";
@@ -318,7 +317,6 @@ export function ShellTopbar({
 						) : null}
 					</>
 				) : null}
-				<AppMemoryIndicator style={noDragStyle} />
 				{isSessionRoute ? (
 					/* The pinned controls are owned by SessionView so they stay at the
 					   window's right edge. Reserve their width only when the rail is closed. */
