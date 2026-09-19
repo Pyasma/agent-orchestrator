@@ -252,8 +252,15 @@ func TestCommandBuilders(t *testing.T) {
 	if got, want := setMouseOnArgs("sess-1"), []string{"set-option", "-t", "sess-1", "mouse", "on"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("setMouseOnArgs = %#v, want %#v", got, want)
 	}
-	if got, want := setDetachOnDestroyOnArgs("sess-1"), []string{"set-option", "-t", "sess-1", "detach-on-destroy", "on"}; !reflect.DeepEqual(got, want) {
+	// set-option uses the exact-match target `=<id>:`, unlike the plain targets
+	// above: this call can run long after creation, when the session may
+	// already be gone, and a plain target then risks silently re-targeting an
+	// unrelated session sharing the name prefix (see setDetachOnDestroyOnArgs).
+	if got, want := setDetachOnDestroyOnArgs("sess-1"), []string{"set-option", "-t", "=sess-1:", "detach-on-destroy", "on"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("setDetachOnDestroyOnArgs = %#v, want %#v", got, want)
+	}
+	if got, want := showDetachOnDestroyArgs("sess-1"), []string{"show-options", "-t", "=sess-1:", "-v", "detach-on-destroy"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("showDetachOnDestroyArgs = %#v, want %#v", got, want)
 	}
 	// kill-session and has-session use exact-match prefix =.
 	if got, want := killSessionArgs("sess-1"), []string{"kill-session", "-t", "=sess-1"}; !reflect.DeepEqual(got, want) {
@@ -775,9 +782,11 @@ func TestIsAliveAdoptsSessionFromLegacyDefaultSocket(t *testing.T) {
 	})
 	fr := &fakeRunnerSequence{results: []fakeRunnerResult{
 		{out: []byte("can't find session: sess-1"), err: &exec.ExitError{}},
-		{}, // legacy default-socket discovery
-		{}, // first has-session call after discovery
-		{}, // cached second has-session call
+		{},                    // legacy default-socket discovery
+		{},                    // enforceDetachOnDestroy: set-option
+		{out: []byte("on\n")}, // enforceDetachOnDestroy: show-options verify
+		{},                    // first has-session call after discovery
+		{},                    // cached second has-session call
 	}}
 	r.runner = fr
 	handle := ports.RuntimeHandle{ID: "sess-1"}
@@ -791,11 +800,15 @@ func TestIsAliveAdoptsSessionFromLegacyDefaultSocket(t *testing.T) {
 	want := [][]string{
 		append([]string{"-L", "ao"}, hasSessionArgs("sess-1")...),
 		append([]string{"-L", "default"}, hasSessionArgs("sess-1")...),
+		append([]string{"-L", "default"}, setDetachOnDestroyOnArgs("sess-1")...),
+		append([]string{"-L", "default"}, showDetachOnDestroyArgs("sess-1")...),
 		append([]string{"-L", "default"}, hasSessionArgs("sess-1")...),
 		append([]string{"-L", "default"}, hasSessionArgs("sess-1")...),
 	}
 	wantBinaries := []string{
 		"bundled-tmux-test",
+		"system-tmux-test",
+		"system-tmux-test",
 		"system-tmux-test",
 		"system-tmux-test",
 		"system-tmux-test",
@@ -825,8 +838,10 @@ func TestIsAliveAdoptsLegacyDefaultSessionWhenNamedSocketDoesNotExist(t *testing
 			out: []byte("error connecting to /private/tmp/tmux-501/ao (No such file or directory)"),
 			err: &exec.ExitError{},
 		},
-		{}, // legacy default-socket discovery
-		{}, // has-session on the adopted legacy socket
+		{},                    // legacy default-socket discovery
+		{},                    // enforceDetachOnDestroy: set-option
+		{out: []byte("on\n")}, // enforceDetachOnDestroy: show-options verify
+		{},                    // has-session on the adopted legacy socket
 	}}
 	r.runner = fr
 
@@ -837,9 +852,11 @@ func TestIsAliveAdoptsLegacyDefaultSessionWhenNamedSocketDoesNotExist(t *testing
 	want := [][]string{
 		append([]string{"-L", "ao"}, hasSessionArgs("sess-1")...),
 		append([]string{"-L", "default"}, hasSessionArgs("sess-1")...),
+		append([]string{"-L", "default"}, setDetachOnDestroyOnArgs("sess-1")...),
+		append([]string{"-L", "default"}, showDetachOnDestroyArgs("sess-1")...),
 		append([]string{"-L", "default"}, hasSessionArgs("sess-1")...),
 	}
-	wantBinaries := []string{"bundled-tmux-test", "system-tmux-test", "system-tmux-test"}
+	wantBinaries := []string{"bundled-tmux-test", "system-tmux-test", "system-tmux-test", "system-tmux-test", "system-tmux-test"}
 	if len(fr.calls) != len(want) {
 		t.Fatalf("calls = %d, want %d: %+v", len(fr.calls), len(want), fr.calls)
 	}
@@ -1869,7 +1886,7 @@ func TestAttachCommandReturnsExpectedArgv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AttachCommand: %v", err)
 	}
-	want := []string{"/usr/bin/tmux", "-u", "-T", "RGB", "attach-session", "-t", "sess-1"}
+	want := []string{"/usr/bin/tmux", "-u", "-T", "RGB", "attach-session", "-t", "=sess-1"}
 	if !reflect.DeepEqual(argv, want) {
 		t.Fatalf("argv = %#v, want %#v", argv, want)
 	}
@@ -1881,7 +1898,7 @@ func TestAttachCommandUsesAppOwnedSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AttachCommand: %v", err)
 	}
-	want := []string{"/opt/ao/resources/tmux/bin/tmux", "-L", "ao", "-u", "-T", "RGB", "attach-session", "-t", "sess-1"}
+	want := []string{"/opt/ao/resources/tmux/bin/tmux", "-L", "ao", "-u", "-T", "RGB", "attach-session", "-t", "=sess-1"}
 	if !reflect.DeepEqual(argv, want) {
 		t.Fatalf("argv = %#v, want %#v", argv, want)
 	}
@@ -1895,7 +1912,7 @@ func TestAttachCommandUsesSystemTmuxForLegacyDefaultSocket(t *testing.T) {
 		Timeout:      time.Second,
 	})
 	argv := r.attachCommandForSocket("sess-1", "")
-	want := []string{"/opt/homebrew/bin/tmux", "-L", "default", "-u", "-T", "RGB", "attach-session", "-t", "sess-1"}
+	want := []string{"/opt/homebrew/bin/tmux", "-L", "default", "-u", "-T", "RGB", "attach-session", "-t", "=sess-1"}
 	if !reflect.DeepEqual(argv, want) {
 		t.Fatalf("argv = %#v, want %#v", argv, want)
 	}
