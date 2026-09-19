@@ -526,11 +526,18 @@ func (r *Runtime) Destroy(ctx context.Context, handle ports.RuntimeHandle) error
 	// Fail closed on any other error: kill-session must not run while the guard
 	// is unconfirmed, because a session that dies with detach-on-destroy still
 	// off can hand AO's terminal, and its input, to one of the user's own
-	// sessions. Only a definitively missing session/server is safe to treat as
-	// idempotent success here, matching kill-session's own handling below.
+	// sessions. Unlike kill-session's own idempotent handling below, this check
+	// deliberately excludes killSessionMissingOutput's transient branch
+	// (serverUnreachableOutput's "connection refused" / protocol-mismatch /
+	// unexpected-exit cases): those mean the probe was inconclusive, not that
+	// the session or server is actually gone, so treating them as safe would
+	// let a merely-flaky set-option wave kill-session through unconfirmed.
+	// Only tmux's own confirmed-absence wording is safe to skip past here.
 	if out, setErr := r.runForSession(ctx, id, setDetachOnDestroyOnArgs(id)...); setErr != nil {
 		var exitErr *exec.ExitError
-		if !errors.As(setErr, &exitErr) || !killSessionMissingOutput(string(out)) {
+		confirmedAbsent := errors.As(setErr, &exitErr) &&
+			(sessionMissingOutput(string(out)) || serverNotRunningOutput(string(out)) || serverSocketAbsentOutput(string(out)))
+		if !confirmedAbsent {
 			return fmt.Errorf("tmux runtime: set detach-on-destroy %s: %w", id, setErr)
 		}
 	}

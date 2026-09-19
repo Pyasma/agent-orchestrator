@@ -1095,6 +1095,34 @@ func TestDestroyFailsClosedWhenDetachOnDestroySettingFails(t *testing.T) {
 	}
 }
 
+// TestDestroyFailsClosedWhenDetachOnDestroySettingConnectionRefused pins the
+// narrower half of the fail-closed guard: "connection refused" (and the other
+// transient wording in serverUnreachableOutput's protocol-mismatch /
+// unexpected-exit branch) means the probe was inconclusive, not that the
+// session or server is confirmed gone. Treating it as safe would let a merely
+// flaky set-option wave kill-session through with the guard unconfirmed,
+// reopening the same terminal/input transfer risk. This must fail closed the
+// same as any other unexpected error, even though killSessionMissingOutput
+// (used by kill-session's own idempotent handling) would have accepted it.
+func TestDestroyFailsClosedWhenDetachOnDestroySettingConnectionRefused(t *testing.T) {
+	r, _ := newTestRuntime(0)
+	fr := &fakeRunnerSelectiveErr{
+		exitErrOn: "set-option",
+		errOutput: []byte("error connecting to /tmp/tmux-1000/default (Connection refused)"),
+	}
+	r.runner = fr
+
+	err := r.Destroy(context.Background(), ports.RuntimeHandle{ID: "sess-1"})
+	if err == nil {
+		t.Fatal("Destroy: got nil, want error when the detach-on-destroy set-option hits a transient connection failure")
+	}
+	for _, c := range fr.calls {
+		if len(c.args) > 0 && c.args[0] == "kill-session" {
+			t.Fatal("Destroy reached kill-session despite an unconfirmed detach-on-destroy guard (connection refused is not confirmed absence)")
+		}
+	}
+}
+
 // TestDestroyIsIdempotentWhenDetachOnDestroySettingReportsSessionMissing
 // covers the other half of the fail-closed change: a set-option failure that
 // definitively means the session is already gone (the same idempotent case
