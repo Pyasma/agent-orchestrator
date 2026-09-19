@@ -965,21 +965,22 @@ func TestIsAliveReportsTransientLegacyConnectionAsProbeInconclusive(t *testing.T
 func TestDestroyIsIdempotentWhenSessionMissing(t *testing.T) {
 	r, fr := newTestRuntime(0)
 	// First output feeds list-panes (which also errors here → no sids); the
+	// second feeds the best-effort detach-on-destroy set-option; the
 	// missing-session marker must land on the kill-session call.
-	fr.outputs = [][]byte{nil, []byte("can't find session: sess-1")}
+	fr.outputs = [][]byte{nil, nil, []byte("can't find session: sess-1")}
 	fr.err = &exec.ExitError{}
 
 	if err := r.Destroy(context.Background(), ports.RuntimeHandle{ID: "sess-1"}); err != nil {
 		t.Fatalf("Destroy: %v", err)
 	}
-	if len(fr.calls) != 2 || fr.calls[0].args[0] != "list-panes" || fr.calls[1].args[0] != "kill-session" {
-		t.Fatalf("calls = %#v, want list-panes then kill-session", fr.calls)
+	if len(fr.calls) != 3 || fr.calls[0].args[0] != "list-panes" || fr.calls[1].args[0] != "set-option" || fr.calls[2].args[0] != "kill-session" {
+		t.Fatalf("calls = %#v, want list-panes, set-option, then kill-session", fr.calls)
 	}
 }
 
 func TestDestroyIsIdempotentWhenNoServer(t *testing.T) {
 	r, fr := newTestRuntime(0)
-	fr.outputs = [][]byte{nil, []byte("no server running on /tmp/tmux-1000/default")}
+	fr.outputs = [][]byte{nil, nil, []byte("no server running on /tmp/tmux-1000/default")}
 	fr.err = &exec.ExitError{}
 
 	if err := r.Destroy(context.Background(), ports.RuntimeHandle{ID: "sess-1"}); err != nil {
@@ -989,7 +990,7 @@ func TestDestroyIsIdempotentWhenNoServer(t *testing.T) {
 
 func TestDestroyReportsUnexpectedFailures(t *testing.T) {
 	r, fr := newTestRuntime(0)
-	fr.outputs = [][]byte{nil, []byte("permission denied")}
+	fr.outputs = [][]byte{nil, nil, []byte("permission denied")}
 	fr.err = &exec.ExitError{}
 
 	if err := r.Destroy(context.Background(), ports.RuntimeHandle{ID: "sess-1"}); err == nil {
@@ -999,17 +1000,21 @@ func TestDestroyReportsUnexpectedFailures(t *testing.T) {
 
 func TestDestroyArgs(t *testing.T) {
 	r, fr := newTestRuntime(0)
-	fr.outputs = [][]byte{nil, nil}
+	fr.outputs = [][]byte{nil, nil, nil}
 
 	if err := r.Destroy(context.Background(), ports.RuntimeHandle{ID: "sess-1"}); err != nil {
 		t.Fatalf("Destroy: %v", err)
 	}
-	// list-panes discovers pane sessions; kill-session (exact-match target
-	// =<id>) tears the session down.
+	// list-panes discovers pane sessions; set-option re-asserts detach-on-destroy
+	// (see setDetachOnDestroyOnArgs) for handles Create never ran on; kill-session
+	// (exact-match target =<id>) tears the session down.
 	if got, want := fr.calls[0].args, listPanePIDsArgs("sess-1"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("list-panes args = %#v, want %#v", got, want)
 	}
-	if got, want := fr.calls[1].args, killSessionArgs("sess-1"); !reflect.DeepEqual(got, want) {
+	if got, want := fr.calls[1].args, setDetachOnDestroyOnArgs("sess-1"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("set-option args = %#v, want %#v", got, want)
+	}
+	if got, want := fr.calls[2].args, killSessionArgs("sess-1"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("destroy args = %#v, want %#v", got, want)
 	}
 }
@@ -1251,8 +1256,8 @@ func TestIsSupervisedProcessAliveRejectsInvalidPanePID(t *testing.T) {
 func TestDestroyReapsDiscoveredPaneSessions(t *testing.T) {
 	r, fr := newTestRuntime(0)
 	// list-panes lists two pane pids (one per line, plus noise the parser must
-	// drop); kill-session then succeeds.
-	fr.outputs = [][]byte{[]byte("4242\n4243\n\n1\n"), nil}
+	// drop); the best-effort set-option and kill-session then succeed.
+	fr.outputs = [][]byte{[]byte("4242\n4243\n\n1\n"), nil, nil}
 	reaper := &recordingReaper{}
 	r.reapSessions = reaper.reap
 
