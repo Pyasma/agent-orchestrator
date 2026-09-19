@@ -1087,6 +1087,67 @@ func TestDestroyArgs(t *testing.T) {
 	}
 }
 
+// TestDestroyPreservesErrorAndRetryPathOnTransientKillSessionFailure pins
+// "treat only confirmed absence as idempotent" for kill-session's own result,
+// not just the pre-kill guard. A transient kill-session failure (connection
+// refused here) does not prove the session actually died — the kill may not
+// have run at all. Destroy must return that error rather than swallow it,
+// because a caller reading nil as success could mark the session terminated
+// and delete its worktree while the session, and its detach-on-destroy
+// guard's target, might still be alive. It must also leave the cached socket
+// mapping alone: this test runs Destroy on a legacy-adopted handle (so the
+// socket is cached after the first call, see socketForSession) and confirms
+// a second Destroy call goes straight back through the cached socket instead
+// of re-running discovery from scratch, proving the retry path survived.
+func TestDestroyPreservesErrorAndRetryPathOnTransientKillSessionFailure(t *testing.T) {
+	r := New(Options{
+		Binary:       "bundled-tmux-test",
+		LegacyBinary: "system-tmux-test",
+		SocketName:   "ao",
+		Timeout:      time.Second,
+	})
+	fr := &fakeRunnerSequence{results: []fakeRunnerResult{
+		{out: []byte("can't find session: sess-1"), err: &exec.ExitError{}}, // private probe: missing
+		{},                    // legacy discovery: found
+		{},                    // enforceDetachOnDestroy: set-option
+		{out: []byte("on\n")}, // enforceDetachOnDestroy: verify
+		{},                    // list-panes (first Destroy call)
+		{},                    // pre-kill set-option (first Destroy call)
+		{out: []byte("error connecting to /tmp/tmux-1000/default (Connection refused)"), err: &exec.ExitError{}}, // kill-session: transient
+		{}, // list-panes (second Destroy call)
+		{}, // pre-kill set-option (second Destroy call)
+		{}, // kill-session (second Destroy call): succeeds
+	}}
+	r.runner = fr
+	handle := ports.RuntimeHandle{ID: "sess-1"}
+
+	err := r.Destroy(context.Background(), handle)
+	if err == nil {
+		t.Fatal("Destroy: got nil, want error on a transient kill-session failure")
+	}
+	if !strings.Contains(err.Error(), "sess-1") {
+		t.Fatalf("Destroy err = %v, want it to name the session", err)
+	}
+
+	if err := r.Destroy(context.Background(), handle); err != nil {
+		t.Fatalf("retry Destroy: %v, want nil (socket mapping must have survived the first failure)", err)
+	}
+
+	if len(fr.calls) != 10 {
+		t.Fatalf("calls = %d, want 10 (4 discovery/enforcement calls once, plus 3 Destroy calls per attempt): %+v", len(fr.calls), fr.calls)
+	}
+	// The retry's three calls (list-panes, set-option, kill-session) must be
+	// exactly that — no interleaved has-session probe, which would mean the
+	// socket mapping was forgotten and adoption ran again from scratch.
+	// Legacy-socket calls carry a "-L default" prefix (see runOnSocket), so the
+	// subcommand is the third arg, not the first.
+	retrySubcommands := []string{fr.calls[7].args[2], fr.calls[8].args[2], fr.calls[9].args[2]}
+	want := []string{"list-panes", "set-option", "kill-session"}
+	if !reflect.DeepEqual(retrySubcommands, want) {
+		t.Fatalf("retry call subcommands = %#v, want %#v (socket mapping was not preserved)", retrySubcommands, want)
+	}
+}
+
 // TestDestroyFailsClosedWhenDetachOnDestroySettingFails pins the fail-closed
 // requirement: if the detach-on-destroy guard cannot be confirmed for an
 // unexpected reason (anything other than the session/server already being
@@ -1114,13 +1175,12 @@ func TestDestroyFailsClosedWhenDetachOnDestroySettingFails(t *testing.T) {
 
 // TestDestroyFailsClosedWhenDetachOnDestroySettingConnectionRefused pins the
 // narrower half of the fail-closed guard: "connection refused" (and the other
-// transient wording in serverUnreachableOutput's protocol-mismatch /
-// unexpected-exit branch) means the probe was inconclusive, not that the
-// session or server is confirmed gone. Treating it as safe would let a merely
-// flaky set-option wave kill-session through with the guard unconfirmed,
-// reopening the same terminal/input transfer risk. This must fail closed the
-// same as any other unexpected error, even though killSessionMissingOutput
-// (used by kill-session's own idempotent handling) would have accepted it.
+// transient wording in transientServerFailureOutput's protocol-mismatch /
+// unexpected-exit cases) means the probe was inconclusive, not that the
+// session or server is confirmed gone (see confirmedAbsentOutput). Treating
+// it as safe would let a merely flaky set-option wave kill-session through
+// with the guard unconfirmed, reopening the same terminal/input transfer
+// risk.
 func TestDestroyFailsClosedWhenDetachOnDestroySettingConnectionRefused(t *testing.T) {
 	r, _ := newTestRuntime(0)
 	fr := &fakeRunnerSelectiveErr{

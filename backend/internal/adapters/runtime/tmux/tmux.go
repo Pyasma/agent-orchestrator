@@ -539,8 +539,17 @@ func (r *Runtime) Destroy(ctx context.Context, handle ports.RuntimeHandle) error
 	r.reapSessions(ctx, sessionIDs, r.reapGrace)
 
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && killSessionMissingOutput(string(out)) {
+		// Only confirmed session/server/socket absence is safe to read as
+		// "already gone" (see confirmedAbsentOutput). A transient failure here
+		// (connection refused, protocol mismatch, unexpected server exit) does
+		// not prove kill-session actually ran: treating it as success used to
+		// forget the socket mapping and return nil, so a caller could mark the
+		// session terminated and delete its worktree while the session, and
+		// its detach-on-destroy guard, might still be alive. Returning the
+		// error instead, and leaving the socket mapping intact, keeps this
+		// retryable: a caller that calls Destroy again finds the same cached
+		// socket rather than re-running discovery from scratch.
+		if confirmedAbsentOutput(err, string(out)) {
 			r.forgetSessionSocket(id)
 			return nil
 		}
@@ -1258,13 +1267,6 @@ func sessionMissingOutput(out string) bool {
 		strings.Contains(s, "session not found")
 }
 
-// serverUnreachableOutput reports whether a non-zero tmux exit means the
-// server itself could not be reached, which is inconclusive for any single
-// session's liveness.
-func serverUnreachableOutput(out string) bool {
-	return serverNotRunningOutput(out) || transientServerFailureOutput(out)
-}
-
 func serverNotRunningOutput(out string) bool {
 	s := strings.ToLower(out)
 	return strings.Contains(s, "no server running")
@@ -1290,24 +1292,17 @@ func transientServerFailureOutput(out string) bool {
 		strings.Contains(s, "server exited unexpectedly")
 }
 
-// killSessionMissingOutput reports whether a non-zero `tmux kill-session`
-// failed because the session was already gone. Teardown stays generous: a
-// missing server also means there is nothing left to kill, so it shares the
-// server-level patterns that liveness probing must not use.
-func killSessionMissingOutput(out string) bool {
-	return sessionMissingOutput(out) || serverUnreachableOutput(out)
-}
-
 // confirmedAbsentOutput reports whether a non-zero tmux exit definitively
 // means the session or its server is gone, as opposed to a merely transient
-// failure (serverUnreachableOutput's "connection refused" / protocol-mismatch
-// / unexpected-exit cases) that leaves the session's actual state unknown.
-// Deliberately narrower than killSessionMissingOutput: kill-session's own
-// idempotent handling can afford to treat a transient failure as "nothing
-// left to kill" because there is nothing further to protect once it runs.
-// The detach-on-destroy guard (Destroy's pre-kill reassertion and
-// enforceDetachOnDestroy's legacy-adoption enforcement) cannot make that
-// trade: letting a merely-flaky probe through unconfirmed would reopen the
+// failure (transientServerFailureOutput's "connection refused" / protocol-
+// mismatch / unexpected-exit cases) that leaves the session's actual state
+// unknown. Every caller that decides whether it is safe to treat a tmux
+// failure as "already gone" — Destroy's own kill-session result, its pre-kill
+// detach-on-destroy reassertion, and enforceDetachOnDestroy's legacy-adoption
+// enforcement — uses this and nothing broader: a transient failure proves
+// nothing ran, so treating it as success let a caller believe teardown (or
+// the detach-on-destroy guard) succeeded when it might not have, which could
+// mean deleting a still-running session's worktree, or reopening the
 // terminal/input transfer this guard exists to prevent (issue #4223).
 func confirmedAbsentOutput(err error, out string) bool {
 	var exitErr *exec.ExitError
