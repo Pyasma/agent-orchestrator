@@ -61,13 +61,13 @@ func (c *refreshableConversation) loadHistory(ctx context.Context) (acpsdk.LoadS
 // projector deduplicates those identities when importing a settled snapshot.
 func (c *refreshableConversation) RefreshHistory(ctx context.Context) ([]ports.ChatEvent, error) {
 	if _, err := c.loadHistory(ctx); err != nil {
-		err = normalizeACPLoadError("refresh ACP session history", err)
-		// Keep the provider's verdict visible even when AO's own deadline also
-		// expired, so the transition can name the load rejection.
+		// When AO's own context ended, the SDK reports that as a synthetic
+		// -32603 carrying the context error text. That is AO's deadline, not a
+		// provider verdict, so it must not be classified as a provider failure.
 		if contextErr := ctx.Err(); contextErr != nil {
-			return nil, fmt.Errorf("%w: %w", contextErr, err)
+			return nil, fmt.Errorf("refresh ACP session history: %w: %w", contextErr, err)
 		}
-		return nil, err
+		return nil, normalizeACPLoadError("refresh ACP session history", err)
 	}
 	return c.ReadHistory(ctx)
 }

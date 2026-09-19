@@ -635,14 +635,16 @@ func normalizeACPError(operation string, err error) error {
 	return fmt.Errorf("%s: %w", operation, err)
 }
 
-// normalizeACPLoadError normalizes a failed ACP session/load. A -32603 answer
-// means the provider itself could not replay the transcript; it is mapped to
-// ports.ErrChatHistoryLoadRejected so the settle loop stops re-sending the same
-// load and the interface transition reports a dedicated code instead of a
-// generic resume failure after its full budget.
+// normalizeACPLoadError normalizes a failed ACP session/load whose calling
+// context is still alive. A -32603 answer then means the provider itself could
+// not replay the transcript; it is mapped to ports.ErrChatHistoryLoadFailed so
+// the settle loop stops re-sending the same load and the interface transition
+// reports a dedicated code instead of a generic resume failure. Callers must
+// check their own context first: the SDK also synthesizes -32603 when the
+// caller's context ends mid-request.
 func normalizeACPLoadError(operation string, err error) error {
 	if isACPInternalError(err) && !isACPAuthRequired(err) {
-		return fmt.Errorf("%w: %s: %w", ports.ErrChatHistoryLoadRejected, operation, err)
+		return fmt.Errorf("%w: %s: %w", ports.ErrChatHistoryLoadFailed, operation, err)
 	}
 	return normalizeACPError(operation, err)
 }

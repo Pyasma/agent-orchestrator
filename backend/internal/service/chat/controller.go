@@ -37,6 +37,14 @@ const (
 	retryClientMessagePrefix   = "retry-attempt/"
 )
 
+// nativeHistoryLoadAttemptLimit bounds one provider re-observation inside the
+// settle budget. An ACP refresh is a full session/load; without this bound a
+// single stalled load consumes the whole nativeHistorySettleLimit before the
+// loop can classify anything. A variable so tests can shorten it.
+var nativeHistoryLoadAttemptLimit = 30 * time.Second
+
+var errNativeHistoryLoadAttemptTimeout = errors.New("native history load attempt exceeded its time limit")
+
 // Store is the durable conversation surface the controller needs. Implemented by
 // the SQLite store.
 type Store interface {
@@ -820,13 +828,18 @@ func (c *Controller) readNativeHistory(
 		if errors.Is(err, ports.ErrChatHistoryUnavailable) && !required {
 			return nil, nil
 		}
+		if errors.Is(err, ports.ErrChatHistoryLoadFailed) {
+			// The provider failed the replay or one attempt hit its bound while
+			// the settle budget was still live. Another identical load cannot
+			// settle anything, and this must not read as the settle wait's own
+			// deadline even though the bounded attempt carries a context error.
+			return nil, fmt.Errorf("read native conversation history: %w", err)
+		}
 		if sawUnsettled && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
 			return nil, fmt.Errorf("wait for settled native conversation history: %w: %w",
 				lastUnsettled, err)
 		}
 		if !errors.Is(err, ports.ErrChatHistoryUnsettled) {
-			// Includes ports.ErrChatHistoryLoadRejected: the provider refused the
-			// replay, so another identical load cannot settle anything.
 			return nil, fmt.Errorf("read native conversation history: %w", err)
 		}
 		sawUnsettled = true
@@ -843,7 +856,7 @@ func (c *Controller) readNativeHistory(
 				lastUnsettled, historyCtx.Err())
 		case <-timer.C:
 		}
-		events, err = refresher.RefreshHistory(historyCtx)
+		events, err = refreshNativeHistoryAttempt(historyCtx, refresher)
 	}
 	for _, event := range events {
 		if event.ProviderEventID == "" {
@@ -851,6 +864,28 @@ func (c *Controller) readNativeHistory(
 		}
 	}
 	return events, nil
+}
+
+// refreshNativeHistoryAttempt runs one provider re-observation under its own
+// deadline, a child of the settle context so parent cancellation still wins.
+// Only a timeout the attempt bound caused, while the settle budget is still
+// live, is reported as a load failure; the parent's own expiry keeps its
+// context error so the caller's settle-wait reporting is unchanged.
+func refreshNativeHistoryAttempt(
+	parent context.Context,
+	refresher ports.ChatHistoryRefresher,
+) ([]ports.ChatEvent, error) {
+	attemptCtx, cancel := context.WithTimeoutCause(
+		parent, nativeHistoryLoadAttemptLimit, errNativeHistoryLoadAttemptTimeout)
+	defer cancel()
+	events, err := refresher.RefreshHistory(attemptCtx)
+	if err != nil && parent.Err() == nil &&
+		errors.Is(context.Cause(attemptCtx), errNativeHistoryLoadAttemptTimeout) {
+		return nil, fmt.Errorf("%w: %w after %v: %w",
+			ports.ErrChatHistoryLoadFailed, errNativeHistoryLoadAttemptTimeout,
+			nativeHistoryLoadAttemptLimit, err)
+	}
+	return events, err
 }
 
 // nativeHistorySettleDelay is the pause before the refresh-th provider

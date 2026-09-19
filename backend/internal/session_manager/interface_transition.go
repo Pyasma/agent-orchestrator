@@ -530,7 +530,7 @@ func (m *Manager) runInterfaceTransition(
 	err = m.startTransitionTarget(ctx, rec.ID, transition.NativeConversationID == "", true, transition.HistoryPolicy)
 	if errors.Is(err, ports.ErrChatHistoryUnsettled) &&
 		!errors.Is(err, ports.ErrChatRecoveryInconclusive) &&
-		!errors.Is(err, ports.ErrChatHistoryLoadRejected) &&
+		!errors.Is(err, ports.ErrChatHistoryLoadFailed) &&
 		len(ports.ChatHistoryMismatchDimensions(err)) == 0 && transition.TargetMode == domain.SessionModeChat {
 		// An ACP history reader may expose an immutable snapshot for one provider
 		// session. Its unsettled result is authoritative for that controller, but
@@ -549,8 +549,8 @@ func (m *Manager) runInterfaceTransition(
 	if err != nil {
 		code := "TARGET_RESUME_FAILED"
 		switch {
-		case errors.Is(err, ports.ErrChatHistoryLoadRejected):
-			code = "TARGET_HISTORY_LOAD_REJECTED"
+		case errors.Is(err, ports.ErrChatHistoryLoadFailed):
+			code = "TARGET_HISTORY_LOAD_FAILED"
 		case errors.Is(err, ports.ErrChatHistoryUnavailable):
 			code = "TARGET_HISTORY_UNAVAILABLE"
 		case ports.ChatHistoryMismatchOnlyUntrustedText(err):
