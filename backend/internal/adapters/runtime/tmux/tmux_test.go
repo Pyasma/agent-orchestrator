@@ -991,7 +991,7 @@ func TestDestroyIsIdempotentWhenNoServer(t *testing.T) {
 // Same teardown generosity for the tmux ≥ 3.4 absent-server wording.
 func TestDestroyIsIdempotentWhenSocketAbsent(t *testing.T) {
 	r, fr := newTestRuntime(0)
-	fr.outputs = [][]byte{nil, []byte("error connecting to /tmp/tmux-1000/default (No such file or directory)")}
+	fr.outputs = [][]byte{nil, nil, []byte("error connecting to /tmp/tmux-1000/default (No such file or directory)")}
 	fr.err = &exec.ExitError{}
 
 	if err := r.Destroy(context.Background(), ports.RuntimeHandle{ID: "sess-1"}); err != nil {
