@@ -2436,8 +2436,9 @@ ipcMain.handle(
 				title: notification.title,
 				body: notification.body,
 				// Mute the OS chime when our sound replaces it or the user turned
-				// sound notifications off; see toastSilent.
-				silent: toastSilent(soundNotificationsEnabled, playsSound),
+				// sound notifications off. Honoured on macOS/Windows only; Linux
+				// notification daemons ignore it (see toastSilent).
+				silent: toastSilent(process.platform, soundNotificationsEnabled, playsSound),
 				// AO logo as the notification icon on Windows/Linux. Omitted on macOS,
 				// where a custom icon renders only as a redundant right-side content image —
 				// macOS uses the app-bundle icon (the AO logo in a packaged build) as the
