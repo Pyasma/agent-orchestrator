@@ -523,9 +523,17 @@ func (r *Runtime) Destroy(ctx context.Context, handle ports.RuntimeHandle) error
 	// handle adopted from tmux's legacy default socket (a session that existed
 	// before AO's private socket, see runForSession) never went through this
 	// daemon's Create and so may still be carrying the user's global setting.
-	// Best-effort and silent: a missing session simply has nothing to set, and
-	// this must never block the kill-session below.
-	_, _ = r.runForSession(ctx, id, setDetachOnDestroyOnArgs(id)...)
+	// Fail closed on any other error: kill-session must not run while the guard
+	// is unconfirmed, because a session that dies with detach-on-destroy still
+	// off can hand AO's terminal, and its input, to one of the user's own
+	// sessions. Only a definitively missing session/server is safe to treat as
+	// idempotent success here, matching kill-session's own handling below.
+	if out, setErr := r.runForSession(ctx, id, setDetachOnDestroyOnArgs(id)...); setErr != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(setErr, &exitErr) || !killSessionMissingOutput(string(out)) {
+			return fmt.Errorf("tmux runtime: set detach-on-destroy %s: %w", id, setErr)
+		}
+	}
 
 	out, err := r.runForSession(ctx, id, killSessionArgs(id)...)
 	// Reap regardless of the kill-session result: orphaned children outlive the

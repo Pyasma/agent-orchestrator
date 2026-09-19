@@ -964,10 +964,11 @@ func TestIsAliveReportsTransientLegacyConnectionAsProbeInconclusive(t *testing.T
 
 func TestDestroyIsIdempotentWhenSessionMissing(t *testing.T) {
 	r, fr := newTestRuntime(0)
-	// First output feeds list-panes (which also errors here → no sids); the
-	// second feeds the best-effort detach-on-destroy set-option; the
-	// missing-session marker must land on the kill-session call.
-	fr.outputs = [][]byte{nil, nil, []byte("can't find session: sess-1")}
+	// First output feeds list-panes (which also errors here → no sids); fr.err
+	// applies to every call, so the missing-session marker must also cover the
+	// detach-on-destroy set-option, not just kill-session (both must be
+	// tolerated as idempotent, see the fail-closed change in Destroy).
+	fr.outputs = [][]byte{nil, []byte("can't find session: sess-1"), []byte("can't find session: sess-1")}
 	fr.err = &exec.ExitError{}
 
 	if err := r.Destroy(context.Background(), ports.RuntimeHandle{ID: "sess-1"}); err != nil {
@@ -980,7 +981,7 @@ func TestDestroyIsIdempotentWhenSessionMissing(t *testing.T) {
 
 func TestDestroyIsIdempotentWhenNoServer(t *testing.T) {
 	r, fr := newTestRuntime(0)
-	fr.outputs = [][]byte{nil, nil, []byte("no server running on /tmp/tmux-1000/default")}
+	fr.outputs = [][]byte{nil, []byte("no server running on /tmp/tmux-1000/default"), []byte("no server running on /tmp/tmux-1000/default")}
 	fr.err = &exec.ExitError{}
 
 	if err := r.Destroy(context.Background(), ports.RuntimeHandle{ID: "sess-1"}); err != nil {
@@ -991,7 +992,11 @@ func TestDestroyIsIdempotentWhenNoServer(t *testing.T) {
 // Same teardown generosity for the tmux ≥ 3.4 absent-server wording.
 func TestDestroyIsIdempotentWhenSocketAbsent(t *testing.T) {
 	r, fr := newTestRuntime(0)
-	fr.outputs = [][]byte{nil, nil, []byte("error connecting to /tmp/tmux-1000/default (No such file or directory)")}
+	fr.outputs = [][]byte{
+		nil,
+		[]byte("error connecting to /tmp/tmux-1000/default (No such file or directory)"),
+		[]byte("error connecting to /tmp/tmux-1000/default (No such file or directory)"),
+	}
 	fr.err = &exec.ExitError{}
 
 	if err := r.Destroy(context.Background(), ports.RuntimeHandle{ID: "sess-1"}); err != nil {
@@ -1062,6 +1067,50 @@ func TestDestroyArgs(t *testing.T) {
 	}
 	if got, want := fr.calls[2].args, killSessionArgs("sess-1"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("destroy args = %#v, want %#v", got, want)
+	}
+}
+
+// TestDestroyFailsClosedWhenDetachOnDestroySettingFails pins the fail-closed
+// requirement: if the detach-on-destroy guard cannot be confirmed for an
+// unexpected reason (anything other than the session/server already being
+// gone), Destroy must not reach kill-session. A session that dies with the
+// guard still off can hand AO's terminal, and its input, to one of the user's
+// own tmux sessions (issue #4223) — proceeding on an unconfirmed guard would
+// reopen exactly that gap. kill-session is configured here to succeed if
+// called, so the assertion only passes if Destroy actually stopped short of
+// it.
+func TestDestroyFailsClosedWhenDetachOnDestroySettingFails(t *testing.T) {
+	r, _ := newTestRuntime(0)
+	fr := &fakeRunnerSelectiveErr{exitErrOn: "set-option", errOutput: []byte("permission denied")}
+	r.runner = fr
+
+	err := r.Destroy(context.Background(), ports.RuntimeHandle{ID: "sess-1"})
+	if err == nil {
+		t.Fatal("Destroy: got nil, want error when the detach-on-destroy set-option fails unexpectedly")
+	}
+	for _, c := range fr.calls {
+		if len(c.args) > 0 && c.args[0] == "kill-session" {
+			t.Fatal("Destroy reached kill-session despite an unconfirmed detach-on-destroy guard")
+		}
+	}
+}
+
+// TestDestroyIsIdempotentWhenDetachOnDestroySettingReportsSessionMissing
+// covers the other half of the fail-closed change: a set-option failure that
+// definitively means the session is already gone (the same idempotent case
+// kill-session itself tolerates) must not block teardown.
+func TestDestroyIsIdempotentWhenDetachOnDestroySettingReportsSessionMissing(t *testing.T) {
+	r, fr := newTestRuntime(0)
+	// list-panes: no session, no panes. set-option: session missing. kill-session:
+	// session missing too (the ordinary double-kill case).
+	fr.outputs = [][]byte{nil, []byte("can't find session: sess-1"), []byte("can't find session: sess-1")}
+	fr.err = &exec.ExitError{}
+
+	if err := r.Destroy(context.Background(), ports.RuntimeHandle{ID: "sess-1"}); err != nil {
+		t.Fatalf("Destroy: %v", err)
+	}
+	if len(fr.calls) != 3 || fr.calls[2].args[0] != "kill-session" {
+		t.Fatalf("calls = %#v, want kill-session still attempted after a missing-session set-option", fr.calls)
 	}
 }
 
