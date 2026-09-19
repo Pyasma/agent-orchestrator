@@ -46,6 +46,17 @@ export function shouldToast(notification: { title?: string }, isSupported: boole
 }
 
 /**
+ * Whether the OS toast should be muted. Two reasons to mute: the user turned
+ * sound notifications off (the preference has to silence every chime, not
+ * just ours), or AO is about to play its own sound and must not layer the
+ * system chime on top of it. Otherwise (sound on, informational type) the
+ * toast keeps its native chime, which is the only sound that type gets.
+ */
+export function toastSilent(soundNotificationsEnabled: boolean, playsSound: boolean): boolean {
+	return !soundNotificationsEnabled || playsSound;
+}
+
+/**
  * macOS dock bounce style. A blocked agent waiting on the user keeps bouncing
  * until the app is activated ("critical"); anything else bounces once
  * ("informational"). This is where urgency lives, so every notification can

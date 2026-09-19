@@ -5,6 +5,7 @@ import {
 	shouldReplaceBounce,
 	shouldSignalAttention,
 	shouldToast,
+	toastSilent,
 	type NotificationType,
 } from "./notification-signals";
 
@@ -49,6 +50,21 @@ describe("shouldReplaceBounce", () => {
 
 	it("never replaces a pending critical bounce, so a blocked agent stays loud", () => {
 		expect(shouldReplaceBounce({ critical: true })).toBe(false);
+	});
+});
+
+describe("toastSilent", () => {
+	it("mutes the toast whenever sound notifications are off", () => {
+		expect(toastSilent(false, false)).toBe(true);
+		expect(toastSilent(false, true)).toBe(true);
+	});
+
+	it("mutes the toast when AO plays its own sound", () => {
+		expect(toastSilent(true, true)).toBe(true);
+	});
+
+	it("keeps the native chime for an informational toast when sound is on", () => {
+		expect(toastSilent(true, false)).toBe(false);
 	});
 });
 
