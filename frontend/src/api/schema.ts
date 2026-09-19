@@ -2653,6 +2653,10 @@ export interface components {
         AgentSwitchResponse: {
             switch: components["schemas"]["AgentSwitch"];
         };
+        AppMemoryResponse: {
+            processCount: number;
+            rssBytes: number;
+        };
         AttachmentInput: {
             data: string;
             mimeType?: string;
@@ -3501,7 +3505,9 @@ export interface components {
             runs: components["schemas"]["ReviewRun"][];
         };
         ListSessionMemoryResponse: {
+            app?: components["schemas"]["AppMemoryResponse"];
             sessions: components["schemas"]["SessionMemoryResponse"][];
+            system?: components["schemas"]["SystemMemoryResponse"];
         };
         ListSessionPRsResponse: {
             prs: components["schemas"]["SessionPRSummary"][];
@@ -4344,6 +4350,10 @@ export interface components {
              * @enum {string}
              */
             targetHarness: "claude-code" | "codex";
+        };
+        SystemMemoryResponse: {
+            availableBytes: number;
+            totalBytes: number;
         };
         SystemRequirement: {
             /** @description Extra context: the resolved path when satisfied, or why it is not. */
