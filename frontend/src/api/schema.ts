@@ -2265,6 +2265,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/pause-idle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause every idle worker agent, keeping its session for resume */
+        post: operations["pauseIdleSessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings": {
         parameters: {
             query?: never;
@@ -2282,6 +2299,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/auto-pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Set how long an agent may sit idle before AO pauses it (zero turns it off) */
+        patch: operations["updateAutoPause"];
+        trace?: never;
+    };
     "/api/v1/settings/cloud-offering": {
         parameters: {
             query?: never;
@@ -2297,6 +2331,23 @@ export interface paths {
         head?: never;
         /** Turn the cloud offering on or off for this machine */
         patch: operations["updateCloudOffering"];
+        trace?: never;
+    };
+    "/api/v1/settings/memory-budget": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Set the memory budget AO is measured against (zero restores Auto) */
+        patch: operations["updateMemoryBudget"];
         trace?: never;
     };
     "/api/v1/settings/session-interface": {
@@ -3515,6 +3566,7 @@ export interface components {
         };
         ListSessionMemoryResponse: {
             app?: components["schemas"]["AppMemoryResponse"];
+            budget?: components["schemas"]["MemoryBudgetResponse"];
             sessions: components["schemas"]["SessionMemoryResponse"][];
             system?: components["schemas"]["SystemMemoryResponse"];
         };
@@ -3568,6 +3620,10 @@ export interface components {
              * @enum {string}
              */
             status: "read";
+        };
+        MemoryBudgetResponse: {
+            auto: boolean;
+            bytes: number;
         };
         MergePRRequest: {
             expectedHeadSha: string;
@@ -3682,6 +3738,15 @@ export interface components {
             status: "needs_review" | "running" | "up_to_date" | "changes_requested" | "ineligible";
             targetSha: string;
             title: string;
+        };
+        PauseIdleFailedSession: {
+            reason: string;
+            sessionId: string;
+        };
+        PauseIdleSessionsResponse: {
+            failed: components["schemas"]["PauseIdleFailedSession"][];
+            ok: boolean;
+            paused: string[];
         };
         PreviewServerStatusResponse: {
             configuration?: string;
@@ -4202,6 +4267,7 @@ export interface components {
             harness?: "claude-code" | "codex" | "copilot" | "cursor" | "kilocode" | "opencode" | "kiro" | "pi" | "agy" | "devin" | "droid" | "kimi" | "kimchi" | "muse" | "amp" | "aider" | "grok" | "crush" | "auggie" | "cline" | "autohand";
         };
         SettingsResponse: {
+            autoPauseIdleMinutes: number;
             chatHarnesses: string[];
             client: string;
             cloudControlPlaneUrl: string;
@@ -4210,6 +4276,8 @@ export interface components {
             /** @enum {string} */
             defaultSessionMode: "chat" | "tui";
             localEnabled: boolean;
+            /** Format: int64 */
+            memoryBudgetBytes: number;
         };
         ShellTerminalEnvelope: {
             shellTerminal: components["schemas"]["ShellTerminalResponse"];
@@ -4407,6 +4475,12 @@ export interface components {
         UnregisterPushDeviceResponse: {
             deleted: boolean;
             token: string;
+        };
+        UpdateAutoPauseRequest: {
+            idleMinutes: null | number;
+        };
+        UpdateMemoryBudgetRequest: {
+            bytes: null | number;
         };
         UpdateProjectSettingsInput: {
             config: components["schemas"]["ProjectConfig"];
@@ -12890,6 +12964,67 @@ export interface operations {
             };
         };
     };
+    pauseIdleSessions: {
+        parameters: {
+            query?: {
+                /** @description Project id filter. When omitted, sweep every project. */
+                project?: string;
+                /** @description Pause only agents idle at least this long. Zero or omitted pauses every idle agent. */
+                idleMinutes?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PauseIdleSessionsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     getSettings: {
         parameters: {
             query?: never;
@@ -12928,6 +13063,57 @@ export interface operations {
             };
         };
     };
+    updateAutoPause: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAutoPauseRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     updateCloudOffering: {
         parameters: {
             query?: never;
@@ -12938,6 +13124,57 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ControllersUpdateCloudOfferingRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    updateMemoryBudget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMemoryBudgetRequest"];
             };
         };
         responses: {

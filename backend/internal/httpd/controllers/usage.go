@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"errors"
+	settingssvc "github.com/aoagents/agent-orchestrator/backend/internal/service/settings"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -31,10 +32,18 @@ type SessionMemoryService interface {
 	AppMemory(context.Context) (domain.AppMemory, error)
 }
 
+// MemoryBudgetSource reads the user's memory budget preference.
+type MemoryBudgetSource interface {
+	Get(ctx context.Context) (settingssvc.Snapshot, error)
+}
+
 // UsageController owns compact dashboard usage routes.
 type UsageController struct {
 	Svc    UsageSummaryService
 	Memory SessionMemoryService
+	// Budget is optional: without it the response carries no budget and the
+	// client falls back to plain size with no colour.
+	Budget MemoryBudgetSource
 }
 
 // Register mounts usage routes on the supplied router.
@@ -101,7 +110,14 @@ func (c *UsageController) listMemory(w http.ResponseWriter, r *http.Request) {
 	if a, appErr := c.Memory.AppMemory(r.Context()); appErr == nil {
 		app = &AppMemoryResponse{RSSBytes: a.RSSBytes, ProcessCount: a.ProcessCount}
 	}
-	envelope.WriteJSON(w, http.StatusOK, ListSessionMemoryResponse{Sessions: out, System: system, App: app})
+	var budget *MemoryBudgetResponse
+	if c.Budget != nil && system != nil {
+		if snapshot, err := c.Budget.Get(r.Context()); err == nil {
+			bytes, auto := snapshot.ResolveMemoryBudget(system.TotalBytes)
+			budget = &MemoryBudgetResponse{Bytes: bytes, Auto: auto}
+		}
+	}
+	envelope.WriteJSON(w, http.StatusOK, ListSessionMemoryResponse{Sessions: out, System: system, App: app, Budget: budget})
 }
 
 func (c *UsageController) getSession(w http.ResponseWriter, r *http.Request) {
