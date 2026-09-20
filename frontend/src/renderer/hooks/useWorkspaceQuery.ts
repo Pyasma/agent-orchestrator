@@ -121,8 +121,14 @@ function toWorkspaceSession(
 		previewRevision: session.previewRevision,
 		isPinned: session.isPinned ?? false,
 		pinnedAt: session.pinnedAt ?? undefined,
+		pausedAt: session.pausedAt ?? undefined,
+		pauseReason: toPauseReason(session.pauseReason),
 		prs: (session.prs ?? []).map(toPullRequestFacts),
 	};
+}
+
+function toPauseReason(value: string | undefined): WorkspaceSession["pauseReason"] {
+	return value === "user" || value === "idle" || value === "pressure" ? value : undefined;
 }
 
 export const workspaceQueryKey = ["workspaces"] as const;
@@ -188,6 +194,8 @@ function toLocalWorkspaceSession(
 		previewRevision: session.previewRevision,
 		isPinned: session.isPinned ?? false,
 		pinnedAt: session.pinnedAt ?? undefined,
+		pausedAt: session.pausedAt ?? undefined,
+		pauseReason: toPauseReason(session.pauseReason),
 		prs: (session.prs ?? []).map(toPullRequestFacts),
 	};
 }
