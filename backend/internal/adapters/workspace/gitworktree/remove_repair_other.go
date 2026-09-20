@@ -34,7 +34,7 @@ func repairRemovePermissions(root string) bool {
 	if err != nil {
 		return false
 	}
-	defer scoped.Close()
+	defer func() { _ = scoped.Close() }()
 
 	repaired := false
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
