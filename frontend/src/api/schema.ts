@@ -3354,6 +3354,8 @@ export interface components {
         };
         ExitAgentRequest: {
             /** @enum {string} */
+            policy?: "drain" | "interrupt";
+            /** @enum {string} */
             reason?: "user" | "idle" | "pressure";
         };
         ExitAgentResponse: {
