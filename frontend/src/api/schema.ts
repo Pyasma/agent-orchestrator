@@ -2333,7 +2333,7 @@ export interface paths {
         patch: operations["updateCloudOffering"];
         trace?: never;
     };
-    "/api/v1/settings/memory-budget": {
+    "/api/v1/settings/memory-reserve": {
         parameters: {
             query?: never;
             header?: never;
@@ -2346,8 +2346,8 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Set the memory budget AO is measured against (zero restores Auto) */
-        patch: operations["updateMemoryBudget"];
+        /** Set how much host RAM AO keeps free before it stops auto-starting sessions (zero restores the default) */
+        patch: operations["updateMemoryReserve"];
         trace?: never;
     };
     "/api/v1/settings/session-interface": {
@@ -2705,6 +2705,9 @@ export interface components {
             switch: components["schemas"]["AgentSwitch"];
         };
         AppMemoryResponse: {
+            /** Format: double */
+            cpuPercent: number;
+            own?: components["schemas"]["SessionMemoryResponse"];
             processCount: number;
             rssBytes: number;
         };
@@ -3566,7 +3569,7 @@ export interface components {
         };
         ListSessionMemoryResponse: {
             app?: components["schemas"]["AppMemoryResponse"];
-            budget?: components["schemas"]["MemoryBudgetResponse"];
+            reserve?: components["schemas"]["MemoryReserveResponse"];
             sessions: components["schemas"]["SessionMemoryResponse"][];
             system?: components["schemas"]["SystemMemoryResponse"];
         };
@@ -3621,7 +3624,7 @@ export interface components {
              */
             status: "read";
         };
-        MemoryBudgetResponse: {
+        MemoryReserveResponse: {
             auto: boolean;
             bytes: number;
         };
@@ -4016,11 +4019,21 @@ export interface components {
         };
         SessionMemoryProcessResponse: {
             command: string;
+            /**
+             * Format: double
+             * @description Share of one core used since the previous sample; zero on the first.
+             */
+            cpuPercent: number;
             pid: number;
             ppid: number;
             rssBytes: number;
         };
         SessionMemoryResponse: {
+            /**
+             * Format: double
+             * @description Share of one core the whole tree used since the previous sample; zero on the first.
+             */
+            cpuPercent: number;
             processCount: number;
             processes: components["schemas"]["SessionMemoryProcessResponse"][];
             /** @description Resident set size summed over the runtime process tree. */
@@ -4277,7 +4290,7 @@ export interface components {
             defaultSessionMode: "chat" | "tui";
             localEnabled: boolean;
             /** Format: int64 */
-            memoryBudgetBytes: number;
+            memoryReserveBytes: number;
         };
         ShellTerminalEnvelope: {
             shellTerminal: components["schemas"]["ShellTerminalResponse"];
@@ -4429,7 +4442,15 @@ export interface components {
             targetHarness: "claude-code" | "codex";
         };
         SystemMemoryResponse: {
+            /** @description What the kernel would hand out without swapping (MemAvailable). */
             availableBytes: number;
+            cpuCount: number;
+            /** Format: double */
+            load1: number;
+            /** Format: double */
+            swapBytesPerSec: number;
+            swapTotalBytes: number;
+            swapUsedBytes: number;
             totalBytes: number;
         };
         SystemRequirement: {
@@ -4479,7 +4500,7 @@ export interface components {
         UpdateAutoPauseRequest: {
             idleMinutes: null | number;
         };
-        UpdateMemoryBudgetRequest: {
+        UpdateMemoryReserveRequest: {
             bytes: null | number;
         };
         UpdateProjectSettingsInput: {
@@ -13165,7 +13186,7 @@ export interface operations {
             };
         };
     };
-    updateMemoryBudget: {
+    updateMemoryReserve: {
         parameters: {
             query?: never;
             header?: never;
@@ -13174,7 +13195,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["UpdateMemoryBudgetRequest"];
+                "application/json": components["schemas"]["UpdateMemoryReserveRequest"];
             };
         };
         responses: {

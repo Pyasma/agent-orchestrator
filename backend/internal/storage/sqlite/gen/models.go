@@ -148,7 +148,7 @@ type AppSetting struct {
 	UpdatedAt            time.Time
 	CloudOffering        bool
 	AutoPauseIdleMinutes int64
-	MemoryBudgetBytes    int64
+	MemoryReserveBytes   int64
 }
 
 type ChangeLog struct {

@@ -41,7 +41,7 @@ var (
 	// agent finished its turn (it is waiting on a decision, or idleness could
 	// not be verified); the caller may retry with an interrupt.
 	ErrAgentPauseDrainBlocked = errors.New("session: agent is still mid-turn; pause with interrupt to stop now")
-	ErrIncompleteHandle    = errors.New("session: incomplete teardown handle")
+	ErrIncompleteHandle       = errors.New("session: incomplete teardown handle")
 	// ErrProjectNotResolvable means the spawn's project has no usable repo
 	// (unregistered, archived, or missing a path). The API maps it to a 400.
 	ErrProjectNotResolvable = errors.New("session: project repo not resolvable")

@@ -6749,14 +6749,14 @@ paths:
       summary: Turn the cloud offering on or off for this machine
       tags:
       - settings
-  /api/v1/settings/memory-budget:
+  /api/v1/settings/memory-reserve:
     patch:
-      operationId: updateMemoryBudget
+      operationId: updateMemoryReserve
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UpdateMemoryBudgetRequest'
+              $ref: '#/components/schemas/UpdateMemoryReserveRequest'
         required: true
       responses:
         "200":
@@ -6783,7 +6783,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
           description: Not Implemented
-      summary: Set the memory budget AO is measured against (zero restores Auto)
+      summary: Set how much host RAM AO keeps free before it stops auto-starting sessions
+        (zero restores the default)
       tags:
       - settings
   /api/v1/settings/session-interface:
@@ -7745,6 +7746,12 @@ components:
       type: object
     AppMemoryResponse:
       properties:
+        cpuPercent:
+          format: double
+          minimum: 0
+          type: number
+        own:
+          $ref: '#/components/schemas/SessionMemoryResponse'
         processCount:
           minimum: 0
           type: integer
@@ -7754,6 +7761,7 @@ components:
       required:
       - rssBytes
       - processCount
+      - cpuPercent
       type: object
     AttachmentInput:
       properties:
@@ -10151,8 +10159,8 @@ components:
       properties:
         app:
           $ref: '#/components/schemas/AppMemoryResponse'
-        budget:
-          $ref: '#/components/schemas/MemoryBudgetResponse'
+        reserve:
+          $ref: '#/components/schemas/MemoryReserveResponse'
         sessions:
           items:
             $ref: '#/components/schemas/SessionMemoryResponse'
@@ -10292,7 +10300,7 @@ components:
       required:
       - status
       type: object
-    MemoryBudgetResponse:
+    MemoryReserveResponse:
       properties:
         auto:
           type: boolean
@@ -11315,6 +11323,12 @@ components:
       properties:
         command:
           type: string
+        cpuPercent:
+          description: Share of one core used since the previous sample; zero on the
+            first.
+          format: double
+          minimum: 0
+          type: number
         pid:
           type: integer
         ppid:
@@ -11326,10 +11340,17 @@ components:
       - pid
       - ppid
       - rssBytes
+      - cpuPercent
       - command
       type: object
     SessionMemoryResponse:
       properties:
+        cpuPercent:
+          description: Share of one core the whole tree used since the previous sample;
+            zero on the first.
+          format: double
+          minimum: 0
+          type: number
         processCount:
           minimum: 0
           type: integer
@@ -11350,6 +11371,7 @@ components:
       - sessionId
       - rssBytes
       - processCount
+      - cpuPercent
       - sampledAt
       - processes
       type: object
@@ -11973,7 +11995,7 @@ components:
           type: string
         localEnabled:
           type: boolean
-        memoryBudgetBytes:
+        memoryReserveBytes:
           format: int64
           minimum: 0
           type: integer
@@ -11986,7 +12008,7 @@ components:
       - cloudEnabled
       - cloudControlPlaneUrl
       - autoPauseIdleMinutes
-      - memoryBudgetBytes
+      - memoryReserveBytes
       type: object
     ShellTerminalEnvelope:
       properties:
@@ -12353,6 +12375,24 @@ components:
     SystemMemoryResponse:
       properties:
         availableBytes:
+          description: What the kernel would hand out without swapping (MemAvailable).
+          minimum: 0
+          type: integer
+        cpuCount:
+          minimum: 0
+          type: integer
+        load1:
+          format: double
+          minimum: 0
+          type: number
+        swapBytesPerSec:
+          format: double
+          minimum: 0
+          type: number
+        swapTotalBytes:
+          minimum: 0
+          type: integer
+        swapUsedBytes:
           minimum: 0
           type: integer
         totalBytes:
@@ -12361,6 +12401,11 @@ components:
       required:
       - totalBytes
       - availableBytes
+      - swapTotalBytes
+      - swapUsedBytes
+      - swapBytesPerSec
+      - cpuCount
+      - load1
       type: object
     SystemRequirement:
       properties:
@@ -12493,7 +12538,7 @@ components:
       required:
       - idleMinutes
       type: object
-    UpdateMemoryBudgetRequest:
+    UpdateMemoryReserveRequest:
       properties:
         bytes:
           minimum: 0

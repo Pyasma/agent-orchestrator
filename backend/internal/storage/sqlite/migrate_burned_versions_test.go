@@ -154,7 +154,7 @@ var shippedMigrations = map[int64]string{
 	147: "0147_native_history_provenance.sql",
 	148: "0148_session_paused_at.sql",
 	149: "0149_app_settings_auto_pause.sql",
-	150: "0150_app_settings_memory_budget.sql",
+	150: "0150_app_settings_memory_reserve.sql",
 }
 
 // burnedVersion reports version numbers that must never be (re)used: they
