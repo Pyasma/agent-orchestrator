@@ -4439,11 +4439,6 @@ paths:
         schema:
           description: Session identifier, e.g. project-1.
           type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ExitAgentRequest'
       responses:
         "200":
           content:
@@ -4451,12 +4446,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ExitAgentResponse'
           description: OK
-        "400":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Bad Request
         "404":
           content:
             application/json:
@@ -8418,7 +8407,6 @@ components:
           - Working
           - Blocked
           - Exited
-          - Paused
           - No signal
           - Awaiting PR
           - Fixing CI failures
@@ -8470,13 +8458,6 @@ components:
           type: string
         model:
           type: string
-        pauseReason:
-          type: string
-        pausedAt:
-          format: date-time
-          type:
-          - "null"
-          - string
         pinnedAt:
           format: date-time
           type:
@@ -9569,20 +9550,6 @@ components:
       - outputNanos
       - coverage
       - providerAttribution
-      type: object
-    ExitAgentRequest:
-      properties:
-        policy:
-          enum:
-          - drain
-          - interrupt
-          type: string
-        reason:
-          enum:
-          - user
-          - idle
-          - pressure
-          type: string
       type: object
     ExitAgentResponse:
       properties:

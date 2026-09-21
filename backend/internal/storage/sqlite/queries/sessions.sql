@@ -173,8 +173,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     latest_user_prompt, latest_user_prompt_at, latest_assistant_update, latest_assistant_update_at,
     conversation_checkpoint_state, conversation_checkpoint_generation, conversation_checkpoint_native_id,
     conversation_checkpoint_unsettled, conversation_checkpoint_turn_id, native_checkpoint_evidence,
-    native_transcript_path, auto_inject_review, auto_inject_ci, auto_review_enabled, model, session_permissions,
-    paused_at, pause_reason
+    native_transcript_path, auto_inject_review, auto_inject_ci, auto_review_enabled, model, session_permissions
 FROM sessions WHERE id = ?;
 
 -- name: ListSessionsByProject :many
@@ -189,8 +188,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     latest_user_prompt, latest_user_prompt_at, latest_assistant_update, latest_assistant_update_at,
     conversation_checkpoint_state, conversation_checkpoint_generation, conversation_checkpoint_native_id,
     conversation_checkpoint_unsettled, conversation_checkpoint_turn_id, native_checkpoint_evidence,
-    native_transcript_path, auto_inject_review, auto_inject_ci, auto_review_enabled, model, session_permissions,
-    paused_at, pause_reason
+    native_transcript_path, auto_inject_review, auto_inject_ci, auto_review_enabled, model, session_permissions
 FROM sessions WHERE project_id IS ? ORDER BY num;
 
 -- name: ListAllSessions :many
@@ -205,8 +203,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     latest_user_prompt, latest_user_prompt_at, latest_assistant_update, latest_assistant_update_at,
     conversation_checkpoint_state, conversation_checkpoint_generation, conversation_checkpoint_native_id,
     conversation_checkpoint_unsettled, conversation_checkpoint_turn_id, native_checkpoint_evidence,
-    native_transcript_path, auto_inject_review, auto_inject_ci, auto_review_enabled, model, session_permissions,
-    paused_at, pause_reason
+    native_transcript_path, auto_inject_review, auto_inject_ci, auto_review_enabled, model, session_permissions
 FROM sessions ORDER BY project_id, num;
 
 
@@ -230,9 +227,6 @@ UPDATE sessions SET auto_inject_ci = ?, updated_at = ? WHERE id = ?;
 
 -- name: SetSessionPinned :execrows
 UPDATE sessions SET is_pinned = ?, pinned_at = ?, updated_at = ? WHERE id = ?;
-
--- name: SetSessionPaused :execrows
-UPDATE sessions SET paused_at = ?, pause_reason = ?, updated_at = ? WHERE id = ?;
 
 -- name: SetSessionReviewerConfig :execrows
 UPDATE sessions SET reviewer_harness = ?, reviewer_agent_config = ?, updated_at = ? WHERE id = ?;
