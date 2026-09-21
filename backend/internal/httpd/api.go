@@ -151,7 +151,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 			Capabilities:  deps.SessionCapabilities,
 		},
 		desktop:       &controllers.DesktopWorkspaceController{Svc: deps.DesktopWorkspaces},
-		usage:         &controllers.UsageController{Svc: deps.UsageSummary, Memory: deps.SessionMemory, Reserve: deps.Settings},
+		usage:         &controllers.UsageController{Svc: deps.UsageSummary, Memory: deps.SessionMemory},
 		prs:           &controllers.PRsController{Svc: deps.PRs},
 		reviews:       &controllers.ReviewsController{Svc: deps.Reviews},
 		notifications: &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},

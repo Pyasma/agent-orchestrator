@@ -3,7 +3,6 @@ package controllers
 import (
 	"context"
 	"errors"
-	settingssvc "github.com/aoagents/agent-orchestrator/backend/internal/service/settings"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -32,17 +31,10 @@ type SessionMemoryService interface {
 	AppMemory(context.Context) (domain.AppMemory, error)
 }
 
-// MemoryReserveSource reads the user's memory reserve preference.
-type MemoryReserveSource interface {
-	Get(ctx context.Context) (settingssvc.Snapshot, error)
-}
-
 // UsageController owns compact dashboard usage routes.
 type UsageController struct {
 	Svc    UsageSummaryService
 	Memory SessionMemoryService
-	// Reserve is optional: without it the response carries no reserve line.
-	Reserve MemoryReserveSource
 }
 
 // Register mounts usage routes on the supplied router.
@@ -111,14 +103,7 @@ func (c *UsageController) listMemory(w http.ResponseWriter, r *http.Request) {
 			app.Own = &own
 		}
 	}
-	var reserve *MemoryReserveResponse
-	if c.Reserve != nil && system != nil {
-		if snapshot, err := c.Reserve.Get(r.Context()); err == nil {
-			bytes, auto := snapshot.ResolveMemoryReserve()
-			reserve = &MemoryReserveResponse{Bytes: bytes, Auto: auto}
-		}
-	}
-	envelope.WriteJSON(w, http.StatusOK, ListSessionMemoryResponse{Sessions: out, System: system, App: app, Reserve: reserve})
+	envelope.WriteJSON(w, http.StatusOK, ListSessionMemoryResponse{Sessions: out, System: system, App: app})
 }
 
 func sessionMemoryResponse(item domain.SessionMemory) SessionMemoryResponse {
