@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { aoBridge } from "../../lib/bridge";
 import type { ConversationActivity } from "../../types/conversation";
 import { ElicitationCard } from "./ElicitationCard";
@@ -21,6 +21,10 @@ function activity(detail: ConversationActivity["detail"]): ConversationActivity 
 }
 
 describe("ElicitationCard", () => {
+	beforeEach(() => {
+		window.localStorage.clear();
+	});
+
 	const claudeQuestions = {
 		type: "object" as const,
 		required: ["question_0", "question_1"],
@@ -120,6 +124,69 @@ describe("ElicitationCard", () => {
 			question_1: "Go",
 			question_1_custom: "Rust",
 		});
+	});
+
+	it("restores a typed custom answer after the card is unmounted and remounted", async () => {
+		const user = userEvent.setup();
+		const card = (
+			<ElicitationCard
+				activity={activity({ inputMode: "form", schema: claudeQuestions })}
+				sessionId="session-1"
+				onResolve={vi.fn()}
+			/>
+		);
+		const first = render(card);
+
+		await user.click(screen.getByRole("radio", { name: /Native/ }));
+		await user.type(screen.getByLabelText("Other approach"), "Hybrid");
+		// Switching sessions unmounts the whole Chat timeline.
+		first.unmount();
+
+		render(card);
+		expect(screen.getByRole("radio", { name: /Native/ })).toBeChecked();
+		expect(screen.getByLabelText("Other approach")).toHaveValue("Hybrid");
+	});
+
+	it("restores the question the human had reached", async () => {
+		const user = userEvent.setup();
+		const card = (
+			<ElicitationCard
+				activity={activity({ inputMode: "form", schema: claudeQuestions })}
+				sessionId="session-1"
+				onResolve={vi.fn()}
+			/>
+		);
+		const first = render(card);
+
+		await user.click(screen.getByRole("radio", { name: /Native/ }));
+		await user.click(screen.getByRole("button", { name: "Next" }));
+		first.unmount();
+
+		render(card);
+		expect(screen.getByRole("group", { name: /Language/ })).toBeInTheDocument();
+	});
+
+	it("drops the draft once the question is answered", async () => {
+		const user = userEvent.setup();
+		const card = (
+			<ElicitationCard
+				activity={activity({ inputMode: "form", schema: claudeQuestions })}
+				sessionId="session-1"
+				onResolve={vi.fn().mockResolvedValue(undefined)}
+			/>
+		);
+		const first = render(card);
+
+		await user.click(screen.getByRole("radio", { name: /Native/ }));
+		await user.type(screen.getByLabelText("Other approach"), "Hybrid");
+		await user.click(screen.getByRole("button", { name: "Next" }));
+		await user.click(screen.getByRole("radio", { name: "Go" }));
+		await user.click(screen.getByRole("button", { name: "Continue" }));
+		first.unmount();
+
+		render(card);
+		expect(screen.getByLabelText("Other approach")).toHaveValue("");
+		expect(screen.getByRole("radio", { name: /Native/ })).not.toBeChecked();
 	});
 
 	it("keeps generic MCP forms in the all-fields layout", () => {

@@ -3446,7 +3446,7 @@ function TimelineItem({
 		return <ApprovalCard activity={item} onDecide={onDecide} busy={busy} />;
 	}
 	if (item.activityKind === "user_input") {
-		return <ElicitationCard activity={item} onResolve={onResolveInput} />;
+		return <ElicitationCard activity={item} sessionId={sessionId} onResolve={onResolveInput} />;
 	}
 	if (isCompaction(item)) {
 		return <CompactionMarker activity={item} />;

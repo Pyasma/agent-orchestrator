@@ -1,6 +1,11 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { ExternalLink, HelpCircle, Loader2 } from "lucide-react";
 import { aoBridge } from "../../lib/bridge";
+import {
+	clearElicitationDraft,
+	readElicitationDraft,
+	writeElicitationDraft,
+} from "../../lib/elicitation-drafts";
 import { cn } from "../../lib/utils";
 import type { ConversationActivity } from "../../types/conversation";
 import { Button } from "../ui/button";
@@ -11,9 +16,12 @@ type PropertyEntry = [string, Record<string, unknown>];
 
 export function ElicitationCard({
 	activity,
+	sessionId,
 	onResolve,
 }: {
 	activity: ConversationActivity;
+	/** Scopes the in-progress answer so switching sessions does not discard it. */
+	sessionId?: string;
 	onResolve?: (
 		requestId: string,
 		action: InputAction,
@@ -32,6 +40,7 @@ export function ElicitationCard({
 		setError(undefined);
 		try {
 			await onResolve(requestId, action, content);
+			if (sessionId) clearElicitationDraft(sessionId, requestId);
 		} catch (reason) {
 			setError(reason instanceof Error ? reason.message : "The answer could not be sent.");
 		} finally {
@@ -66,7 +75,12 @@ export function ElicitationCard({
 			{pending && activity.detail?.inputMode === "url" ? (
 				<URLRequest activity={activity} disabled={submitting || unavailable} onResolve={resolve} />
 			) : pending ? (
-				<FormRequest activity={activity} disabled={submitting || unavailable} onResolve={resolve} />
+				<FormRequest
+					activity={activity}
+					draftKey={sessionId && requestId ? { sessionId, requestId } : undefined}
+					disabled={submitting || unavailable}
+					onResolve={resolve}
+				/>
 			) : null}
 
 			{error ? (
@@ -141,10 +155,12 @@ function URLRequest({
 
 function FormRequest({
 	activity,
+	draftKey,
 	disabled,
 	onResolve,
 }: {
 	activity: ConversationActivity;
+	draftKey?: { sessionId: string; requestId: string };
 	disabled: boolean;
 	onResolve: (action: InputAction, content?: Record<string, unknown>) => Promise<void>;
 }) {
@@ -152,9 +168,22 @@ function FormRequest({
 	const properties = useMemo(() => Object.entries(schema?.properties ?? {}), [schema?.properties]);
 	const questionGroups = useMemo(() => claudeQuestionGroups(properties), [properties]);
 	const required = useMemo(() => new Set(schema?.required ?? []), [schema?.required]);
-	const [values, setValues] = useState<Record<string, InputValue>>(() => initialValues(properties));
+	const draft = useMemo(
+		() => (draftKey ? readElicitationDraft(draftKey.sessionId, draftKey.requestId) : undefined),
+		// The draft is read once per mount; later edits are written, not re-read.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		[draftKey?.sessionId, draftKey?.requestId],
+	);
+	const [values, setValues] = useState<Record<string, InputValue>>(() =>
+		restoreValues(initialValues(properties), draft?.values, properties),
+	);
 	const [missing, setMissing] = useState<Set<string>>(new Set());
-	const [activeQuestion, setActiveQuestion] = useState(0);
+	const [activeQuestion, setActiveQuestion] = useState(draft?.activeQuestion ?? 0);
+
+	useEffect(() => {
+		if (!draftKey) return;
+		writeElicitationDraft(draftKey.sessionId, draftKey.requestId, { values, activeQuestion });
+	}, [draftKey?.sessionId, draftKey?.requestId, values, activeQuestion]);
 	const visibleProperties = questionGroups?.[activeQuestion] ?? properties;
 	const hasPreviousQuestion = questionGroups !== undefined && activeQuestion > 0;
 	const hasNextQuestion = questionGroups !== undefined && activeQuestion < questionGroups.length - 1;
@@ -392,6 +421,21 @@ function claudeQuestionGroups(properties: PropertyEntry[]): PropertyEntry[][] | 
 		ordered.push(group.custom ? [group.question, group.custom] : [group.question]);
 	}
 	return ordered;
+}
+
+/** Keeps a saved answer only for fields the current schema still declares. */
+function restoreValues(
+	defaults: Record<string, InputValue>,
+	saved: Record<string, InputValue> | undefined,
+	properties: PropertyEntry[],
+): Record<string, InputValue> {
+	if (!saved) return defaults;
+	const known = new Set(properties.map(([name]) => name));
+	const values = { ...defaults };
+	for (const [name, value] of Object.entries(saved)) {
+		if (known.has(name)) values[name] = value;
+	}
+	return values;
 }
 
 function initialValues(properties: PropertyEntry[]): Record<string, InputValue> {
