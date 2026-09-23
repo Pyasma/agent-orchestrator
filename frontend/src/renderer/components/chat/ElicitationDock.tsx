@@ -3,6 +3,7 @@ import { ExternalLink, Loader2 } from "lucide-react";
 import { aoBridge } from "../../lib/bridge";
 import {
 	clearElicitationDraft,
+	pruneExpiredElicitationDraftsOnce,
 	readElicitationDraft,
 	writeElicitationDraft,
 } from "../../lib/elicitation-drafts";
@@ -64,7 +65,10 @@ export function ElicitationDock({
 			{activity.detail?.inputMode === "url" ? (
 				<URLRequest activity={activity} disabled={submitting || unavailable} onResolve={resolve} />
 			) : (
+				// Keyed by request: a new question replaces the dock's form outright
+				// instead of inheriting the previous one's answers.
 				<FormRequest
+					key={requestId ?? activity.id}
 					activity={activity}
 					draftKey={sessionId && requestId ? { sessionId, requestId } : undefined}
 					disabled={submitting || unavailable}
@@ -193,6 +197,12 @@ function FormRequest({
 	const properties = useMemo(() => Object.entries(schema?.properties ?? {}), [schema?.properties]);
 	const questionGroups = useMemo(() => claudeQuestionGroups(properties), [properties]);
 	const required = useMemo(() => new Set(schema?.required ?? []), [schema?.required]);
+	// One sweep of abandoned drafts per renderer run, paid when a question first
+	// appears rather than on every edit.
+	useEffect(() => {
+		pruneExpiredElicitationDraftsOnce();
+	}, []);
+
 	const draft = useMemo(
 		() => (draftKey ? readElicitationDraft(draftKey.sessionId, draftKey.requestId) : undefined),
 		// The draft is read once per mount; later edits are written, not re-read.
@@ -204,11 +214,14 @@ function FormRequest({
 	);
 	const [missing, setMissing] = useState<Set<string>>(new Set());
 	const [activeQuestion, setActiveQuestion] = useState(draft?.activeQuestion ?? 0);
+	// Only a question the human actually touched is worth storing. A question
+	// merely shown — and perhaps cancelled by the agent — leaves nothing behind.
+	const [touched, setTouched] = useState(false);
 
 	useEffect(() => {
-		if (!draftKey) return;
+		if (!draftKey || !touched) return;
 		writeElicitationDraft(draftKey.sessionId, draftKey.requestId, { values, activeQuestion });
-	}, [draftKey?.sessionId, draftKey?.requestId, values, activeQuestion]);
+	}, [draftKey?.sessionId, draftKey?.requestId, touched, values, activeQuestion]);
 	const visibleProperties = questionGroups?.[activeQuestion] ?? properties;
 	const hasPreviousQuestion = questionGroups !== undefined && activeQuestion > 0;
 	const hasNextQuestion = questionGroups !== undefined && activeQuestion < questionGroups.length - 1;
@@ -233,6 +246,7 @@ function FormRequest({
 		setMissing(absent);
 		if (absent.size > 0) return;
 		if (hasNextQuestion) {
+			setTouched(true);
 			setActiveQuestion((current) => current + 1);
 			return;
 		}
@@ -260,6 +274,7 @@ function FormRequest({
 						labelledBy={questionGroups && index === 0 ? headerId : undefined}
 						rows={Boolean(questionGroups)}
 						onChange={(value) => {
+							setTouched(true);
 							setValues((current) => ({ ...current, [name]: value }));
 							setMissing((current) => {
 								if (!current.has(name)) return current;

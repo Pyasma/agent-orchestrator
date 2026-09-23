@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { aoBridge } from "../../lib/bridge";
+import { readElicitationDraft } from "../../lib/elicitation-drafts";
 import type { ConversationActivity } from "../../types/conversation";
 import { ElicitationDock } from "./ElicitationDock";
 
@@ -187,6 +188,41 @@ describe("ElicitationDock", () => {
 		render(dock);
 		expect(screen.getByLabelText("Other approach")).toHaveValue("");
 		expect(screen.getByRole("radio", { name: /Native/ })).not.toBeChecked();
+	});
+
+	it("starts a replacing question from scratch instead of inheriting answers", async () => {
+		const user = userEvent.setup();
+		const first = activity({ inputMode: "form", schema: claudeQuestions });
+		const view = render(<ElicitationDock activity={first} sessionId="session-1" onResolve={vi.fn()} />);
+
+		await user.click(screen.getByRole("radio", { name: /Native/ }));
+		await user.type(screen.getByLabelText("Other approach"), "Hybrid");
+
+		// A second question arrives in the same dock, without it unmounting.
+		view.rerender(
+			<ElicitationDock
+				activity={{ ...first, id: "question-2", requestId: "request-2" }}
+				sessionId="session-1"
+				onResolve={vi.fn()}
+			/>,
+		);
+
+		expect(screen.getByLabelText("Other approach")).toHaveValue("");
+		expect(screen.getByRole("radio", { name: /Native/ })).not.toBeChecked();
+		expect(readElicitationDraft("session-1", "request-2")?.values.question_0_custom).toBeUndefined();
+	});
+
+	it("stores nothing for a question that was only shown", () => {
+		const view = render(
+			<ElicitationDock
+				activity={activity({ inputMode: "form", schema: claudeQuestions })}
+				sessionId="session-1"
+				onResolve={vi.fn()}
+			/>,
+		);
+		view.unmount();
+
+		expect(readElicitationDraft("session-1", "request-1")).toBeUndefined();
 	});
 
 	it("keeps generic MCP forms in the all-fields layout", () => {

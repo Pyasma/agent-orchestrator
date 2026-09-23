@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	clearElicitationDraft,
+	pruneExpiredElicitationDraftsOnce,
+	resetElicitationDraftPruning,
 	elicitationDraftKey,
 	pruneExpiredElicitationDrafts,
 	readElicitationDraft,
@@ -10,7 +12,22 @@ import {
 describe("elicitation drafts", () => {
 	beforeEach(() => {
 		window.localStorage.clear();
+		resetElicitationDraftPruning();
 	});
+
+	/** Enumerable stand-in: the shared test stub has no key()/length. */
+	function enumerableStorage() {
+		const values = new Map<string, string>();
+		return {
+			getItem: (key: string) => values.get(key) ?? null,
+			setItem: (key: string, value: string) => void values.set(key, value),
+			removeItem: (key: string) => void values.delete(key),
+			key: (index: number) => [...values.keys()][index] ?? null,
+			get length() {
+				return values.size;
+			},
+		};
+	}
 
 	it("round-trips an in-progress answer", () => {
 		writeElicitationDraft("session-1", "request-1", {
@@ -59,17 +76,7 @@ describe("elicitation drafts", () => {
 	});
 
 	it("prunes drafts left behind by questions that were never resolved", () => {
-		// The shared test stub has no key()/length, so pruning gets a real enumerable store.
-		const values = new Map<string, string>();
-		const storage = {
-			getItem: (key: string) => values.get(key) ?? null,
-			setItem: (key: string, value: string) => void values.set(key, value),
-			removeItem: (key: string) => void values.delete(key),
-			key: (index: number) => [...values.keys()][index] ?? null,
-			get length() {
-				return values.size;
-			},
-		};
+		const storage = enumerableStorage();
 		const eightDays = 8 * 24 * 60 * 60 * 1000;
 		storage.setItem(
 			elicitationDraftKey("session-1", "stale"),
@@ -81,5 +88,37 @@ describe("elicitation drafts", () => {
 
 		expect(readElicitationDraft("session-1", "stale", storage)).toBeUndefined();
 		expect(readElicitationDraft("session-1", "fresh", storage)?.values).toEqual({ a: "two" });
+	});
+
+	it("does not keep writing while the human types", () => {
+		const storage = enumerableStorage();
+		let reads = 0;
+		const counted = { ...storage, getItem: (key: string) => (reads++, storage.getItem(key)) };
+
+		writeElicitationDraft("session-1", "request-1", { values: { a: "o" }, activeQuestion: 0 }, counted);
+		writeElicitationDraft("session-1", "request-1", { values: { a: "on" }, activeQuestion: 0 }, counted);
+		writeElicitationDraft("session-1", "request-1", { values: { a: "one" }, activeQuestion: 0 }, counted);
+
+		// Writing must not walk the store; only the explicit sweep reads every key.
+		expect(reads).toBe(0);
+	});
+
+	it("sweeps only once per renderer run", () => {
+		const storage = enumerableStorage();
+		const eightDays = 8 * 24 * 60 * 60 * 1000;
+		const stale = JSON.stringify({
+			schemaVersion: 1,
+			values: { a: "one" },
+			activeQuestion: 0,
+			updatedAt: Date.now() - eightDays,
+		});
+		storage.setItem(elicitationDraftKey("session-1", "stale"), stale);
+
+		pruneExpiredElicitationDraftsOnce(storage);
+		expect(readElicitationDraft("session-1", "stale", storage)).toBeUndefined();
+
+		storage.setItem(elicitationDraftKey("session-1", "stale-2"), stale);
+		pruneExpiredElicitationDraftsOnce(storage);
+		expect(readElicitationDraft("session-1", "stale-2", storage)?.values).toEqual({ a: "one" });
 	});
 });

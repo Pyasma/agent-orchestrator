@@ -1,7 +1,7 @@
 /**
  * Renderer-owned drafts for a pending agent question (elicitation).
  *
- * The card lives in the Chat timeline, so switching sessions unmounts it and
+ * The question docks above the composer, so switching sessions unmounts it and
  * takes any half-typed "Other" answer with it. The answer is not sent anywhere
  * until the human presses Continue, so the draft stays in this renderer's
  * localStorage — pinned beneath AO's userData directory — keyed by session and
@@ -82,9 +82,8 @@ export function writeElicitationDraft(
 	try {
 		storage.setItem(elicitationDraftKey(sessionId, requestId), JSON.stringify(stored));
 	} catch {
-		return;
+		// A draft that cannot be written is simply not restored later.
 	}
-	pruneExpiredElicitationDrafts(storage);
 }
 
 export function clearElicitationDraft(
@@ -98,6 +97,25 @@ export function clearElicitationDraft(
 	} catch {
 		// A draft that cannot be cleared expires on its own.
 	}
+}
+
+let pruned = false;
+
+/**
+ * Sweeps expired drafts at most once per renderer run. Pruning walks every
+ * stored key, so it belongs on a question appearing, not on a keystroke.
+ */
+export function pruneExpiredElicitationDraftsOnce(
+	storage: ElicitationDraftStorage | undefined = rendererStorage(),
+): void {
+	if (pruned) return;
+	pruned = true;
+	pruneExpiredElicitationDrafts(storage);
+}
+
+/** Test seam: lets a test run the once-per-run sweep again. */
+export function resetElicitationDraftPruning(): void {
+	pruned = false;
 }
 
 /**
