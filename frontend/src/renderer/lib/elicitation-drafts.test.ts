@@ -69,7 +69,12 @@ describe("elicitation drafts", () => {
 	it("drops values the schema could never hold", () => {
 		window.localStorage.setItem(
 			elicitationDraftKey("session-1", "request-1"),
-			JSON.stringify({ schemaVersion: 1, values: { good: "yes", bad: { nested: true } }, activeQuestion: 0 }),
+			JSON.stringify({
+				schemaVersion: 1,
+				values: { good: "yes", bad: { nested: true } },
+				activeQuestion: 0,
+				updatedAt: Date.now(),
+			}),
 		);
 
 		expect(readElicitationDraft("session-1", "request-1")?.values).toEqual({ good: "yes" });
@@ -105,6 +110,7 @@ describe("elicitation drafts", () => {
 
 	it("sweeps only once per renderer run", () => {
 		const storage = enumerableStorage();
+		writeElicitationDraft("session-1", "request-1", { values: { a: "one" }, activeQuestion: 0 }, storage);
 		let keyCalls = 0;
 		const counted = { ...storage, key: (index: number) => (keyCalls++, storage.key(index)) };
 
@@ -112,7 +118,7 @@ describe("elicitation drafts", () => {
 		pruneExpiredElicitationDraftsOnce(counted);
 		pruneExpiredElicitationDraftsOnce(counted);
 
-		// A second and third call must not walk the store again.
+		// One key in the store: the first call walks it once, later calls must not walk again.
 		expect(keyCalls).toBe(1);
 	});
 
