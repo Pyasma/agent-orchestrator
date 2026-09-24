@@ -378,6 +378,8 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"ControllersSessionMemoryProcessResponse":     "SessionMemoryProcessResponse",
 	"ControllersSystemMemoryResponse":             "SystemMemoryResponse",
 	"ControllersAppMemoryResponse":                "AppMemoryResponse",
+	"ControllersSessionActivityResponse":          "SessionActivityResponse",
+	"ControllersSessionStepResponse":              "SessionStepResponse",
 	"ControllersListCompactSessionUsageResponse":  "ListCompactSessionUsageResponse",
 	"ControllersUsageTotalsResponse":              "UsageTotalsResponse",
 	"ControllersUsageModelResponse":               "UsageModelResponse",
