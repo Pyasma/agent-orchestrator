@@ -56,6 +56,18 @@ export function readElicitationDraft(
 	if (!isRecord(parsed)) return undefined;
 	if (parsed.schemaVersion !== ELICITATION_DRAFT_SCHEMA_VERSION) return undefined;
 	if (!isRecord(parsed.values)) return undefined;
+	// Fail closed: a missing, corrupt, future-dated, or stale timestamp is
+	// treated as expired rather than trusted, independent of whether the
+	// once-per-run sweep has already run. Answers can carry sensitive values,
+	// so expiry must hold even when nothing else has written to this store.
+	if (!isFreshTimestamp(parsed.updatedAt, Date.now())) {
+		try {
+			storage.removeItem(elicitationDraftKey(sessionId, requestId));
+		} catch {
+			// A leftover entry that cannot be removed still fails the timestamp check on the next read.
+		}
+		return undefined;
+	}
 	const values: Record<string, ElicitationDraftValue> = {};
 	for (const [name, value] of Object.entries(parsed.values)) {
 		if (isDraftValue(value)) values[name] = value;
@@ -141,12 +153,17 @@ export function pruneExpiredElicitationDrafts(
 			} catch {
 				updatedAt = undefined;
 			}
-			if (typeof updatedAt !== "number" || now - updatedAt > MAX_AGE_MS) expired.push(key);
+			if (!isFreshTimestamp(updatedAt, now)) expired.push(key);
 		}
 		for (const key of expired) storage.removeItem(key);
 	} catch {
 		// Pruning is opportunistic.
 	}
+}
+
+/** A timestamp counts as fresh only if it is a real past-or-present time within MAX_AGE_MS. */
+function isFreshTimestamp(value: unknown, now: number): boolean {
+	return typeof value === "number" && Number.isFinite(value) && value <= now && now - value <= MAX_AGE_MS;
 }
 
 function rendererStorage(): ElicitationDraftStorage | undefined {

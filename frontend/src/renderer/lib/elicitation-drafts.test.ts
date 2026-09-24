@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	clearElicitationDraft,
-	pruneExpiredElicitationDraftsOnce,
-	resetElicitationDraftPruning,
 	elicitationDraftKey,
 	pruneExpiredElicitationDrafts,
+	pruneExpiredElicitationDraftsOnce,
 	readElicitationDraft,
+	resetElicitationDraftPruning,
 	writeElicitationDraft,
 } from "./elicitation-drafts";
 
@@ -105,20 +105,53 @@ describe("elicitation drafts", () => {
 
 	it("sweeps only once per renderer run", () => {
 		const storage = enumerableStorage();
+		let keyCalls = 0;
+		const counted = { ...storage, key: (index: number) => (keyCalls++, storage.key(index)) };
+
+		pruneExpiredElicitationDraftsOnce(counted);
+		pruneExpiredElicitationDraftsOnce(counted);
+		pruneExpiredElicitationDraftsOnce(counted);
+
+		// A second and third call must not walk the store again.
+		expect(keyCalls).toBe(1);
+	});
+
+	it("refuses to restore a stale draft even if no write ever prunes it", () => {
+		// No prune of any kind runs in this test — proves the read path itself
+		// enforces the seven-day expiry instead of relying on the sweep.
 		const eightDays = 8 * 24 * 60 * 60 * 1000;
-		const stale = JSON.stringify({
-			schemaVersion: 1,
-			values: { a: "one" },
-			activeQuestion: 0,
-			updatedAt: Date.now() - eightDays,
-		});
-		storage.setItem(elicitationDraftKey("session-1", "stale"), stale);
+		window.localStorage.setItem(
+			elicitationDraftKey("session-1", "stale"),
+			JSON.stringify({ schemaVersion: 1, values: { a: "one" }, activeQuestion: 0, updatedAt: Date.now() - eightDays }),
+		);
 
-		pruneExpiredElicitationDraftsOnce(storage);
-		expect(readElicitationDraft("session-1", "stale", storage)).toBeUndefined();
+		expect(readElicitationDraft("session-1", "stale")).toBeUndefined();
+		// The stale entry is also removed as a side effect, so a later sweep has nothing to do.
+		expect(window.localStorage.getItem(elicitationDraftKey("session-1", "stale"))).toBeNull();
+	});
 
-		storage.setItem(elicitationDraftKey("session-1", "stale-2"), stale);
-		pruneExpiredElicitationDraftsOnce(storage);
-		expect(readElicitationDraft("session-1", "stale-2", storage)?.values).toEqual({ a: "one" });
+	it("refuses a draft with no, non-numeric, or future-dated updatedAt", () => {
+		window.localStorage.setItem(
+			elicitationDraftKey("session-1", "missing-timestamp"),
+			JSON.stringify({ schemaVersion: 1, values: { a: "one" }, activeQuestion: 0 }),
+		);
+		window.localStorage.setItem(
+			elicitationDraftKey("session-1", "bad-timestamp"),
+			JSON.stringify({ schemaVersion: 1, values: { a: "one" }, activeQuestion: 0, updatedAt: "yesterday" }),
+		);
+		window.localStorage.setItem(
+			elicitationDraftKey("session-1", "future-timestamp"),
+			JSON.stringify({ schemaVersion: 1, values: { a: "one" }, activeQuestion: 0, updatedAt: Date.now() + 60_000 }),
+		);
+
+		expect(readElicitationDraft("session-1", "missing-timestamp")).toBeUndefined();
+		expect(readElicitationDraft("session-1", "bad-timestamp")).toBeUndefined();
+		expect(readElicitationDraft("session-1", "future-timestamp")).toBeUndefined();
+	});
+
+	it("still restores a draft that is fresh but was never swept", () => {
+		writeElicitationDraft("session-1", "request-1", { values: { a: "one" }, activeQuestion: 0 });
+
+		expect(readElicitationDraft("session-1", "request-1")?.values).toEqual({ a: "one" });
 	});
 });
