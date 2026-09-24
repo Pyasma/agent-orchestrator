@@ -53,7 +53,6 @@ export function toBoardSessionPresentation(
 		isTerminated: session.isTerminated,
 		kanbanColumn: session.kanbanColumn,
 		displayStatus: session.displayStatus,
-		statusReadiness: session.statusReadiness,
 		provider: session.provider,
 		status: session.status,
 		statusPresentation:
@@ -204,6 +203,9 @@ function DesktopSessionCard({
 								onClick={(event) => {
 									event.stopPropagation();
 									clearTerminateSessionState(queryClient, session.id);
+									// Force the confirm open instead of toggling it, so repeated
+									// trash taps keep the dialog up rather than dismissing it.
+									setConfirmOpen(true);
 								}}
 								disabled={termination.isPending}
 								type="button"
@@ -231,11 +233,7 @@ function DesktopSessionCard({
 			branchIcon={<GitBranch aria-hidden="true" className="size-icon-2xs shrink-0" />}
 			error={termination.error ?? undefined}
 			externalLink={ProductExternalLink}
-			footer={
-				<>
-					{footer}
-				</>
-			}
+			footer={footer}
 			interactive={interactive}
 			labels={{
 				formatTime: formatTimeCompact,

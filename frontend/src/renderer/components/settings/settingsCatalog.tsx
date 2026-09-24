@@ -29,6 +29,7 @@ const UpdatesSection = lazy(async () => {
 
 type CatalogContext = {
 	cloudEnabled: boolean;
+	focusAgentId?: string;
 };
 
 export type SettingsCatalogItem = {
@@ -40,7 +41,7 @@ export type SettingsCatalogItem = {
 	 * Diagnostics is a live monitor, not a preference: rendering it inside the
 	 * whole-settings page would sample the machine whenever settings opens. */
 	pageOnly?: boolean;
-	render: (t: TFunction, titleHidden: boolean) => ReactNode;
+	render: (t: TFunction, titleHidden: boolean, context: CatalogContext) => ReactNode;
 };
 
 function SettingsContentPanel({ children }: { children: ReactNode }) {
@@ -58,7 +59,7 @@ const globalSettingsCatalog: SettingsCatalogItem[] = [
 		id: "harness",
 		icon: Bot,
 		label: (t) => t("settings.harness"),
-		render: (_t, titleHidden) => <HarnessSettingsSection titleHidden={titleHidden} />,
+		render: (_t, titleHidden, { focusAgentId }) => <HarnessSettingsSection focusAgentId={focusAgentId} titleHidden={titleHidden} />,
 	},
 	{
 		id: "agents",

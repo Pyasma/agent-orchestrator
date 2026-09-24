@@ -33,6 +33,7 @@ var routineInternalCLICommands = []string{
 	"ao hooks",
 	"ao pty-host",
 	"ao codex-login",
+	"ao claude-login",
 }
 
 // CLIActorType infers the actor for legacy loopback CLI telemetry requests that
@@ -58,7 +59,7 @@ func CLIActorType(actorType, commandPath string) string {
 	case "ao session agent-switch", "ao session agent-switch ls", "ao session switch-agent":
 		return "user"
 	}
-	if normalized == "ao hooks" {
+	if normalized == "ao hooks" || normalized == "ao report" {
 		return "agent"
 	}
 	return "system"

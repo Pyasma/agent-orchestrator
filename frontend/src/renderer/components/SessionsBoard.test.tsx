@@ -41,6 +41,7 @@ vi.mock("@tanstack/react-router", () => ({
 
 vi.mock("../hooks/useWorkspaceQuery", () => ({
 	workspaceQueryKey: ["workspaces"],
+	cloudSessionsQueryKey: ["cloud-sessions"],
 	useWorkspaceQuery: workspaceQueryMock,
 	useWorkspaceScope: (projectId?: string) => {
 		const query = workspaceQueryMock();
@@ -127,19 +128,6 @@ beforeEach(() => {
 });
 
 describe("SessionsBoard", () => {
-	it("says a session's status could not be verified, without offering a retry", () => {
-		workspaceQueryMock.mockReturnValue({
-			data: [workspaceWithSessions([boardSession({ id: "unverified", title: "Unverified task", status: "unknown", displayStatus: "Working", statusReadiness: "unavailable" })])],
-			isSuccess: true, isError: false,
-		});
-		renderBoard("p1");
-		expect(screen.queryByText("Working")).not.toBeInTheDocument();
-		expect(screen.getByText("Unable to verify")).toBeInTheDocument();
-		expect(screen.queryByRole("button", { name: "Retry status check" })).not.toBeInTheDocument();
-		expect(postMock).not.toHaveBeenCalled();
-		expect(navigateMock).not.toHaveBeenCalled();
-	});
-
 	it("shows what a session costs the machine on its card", () => {
 		workspaceQueryMock.mockReturnValue({
 			data: [workspaceWithSessions([
