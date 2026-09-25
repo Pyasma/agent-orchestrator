@@ -6,6 +6,14 @@
  * until the human presses Continue, so the draft stays in this renderer's
  * localStorage — pinned beneath AO's userData directory — keyed by session and
  * request id, and is removed once the request is resolved.
+ *
+ * Request ids are not guaranteed unique within a session: the legacy ACP
+ * transport numbers questions from a per-process counter that restarts with
+ * the agent, so a later, unrelated question can be assigned the same id as an
+ * earlier one whose draft is still within its 7-day window. Every read and
+ * write therefore also carries a fingerprint of the question actually being
+ * asked; a draft whose fingerprint does not match is foreign, not stale, and
+ * is discarded the same way.
  */
 
 export type ElicitationDraftValue = string | number | boolean | string[];
@@ -18,6 +26,8 @@ export interface ElicitationDraft {
 interface StoredElicitationDraft extends ElicitationDraft {
 	schemaVersion: typeof ELICITATION_DRAFT_SCHEMA_VERSION;
 	updatedAt: number;
+	/** Identifies the question actually asked; see the module comment on request id reuse. */
+	fingerprint: string;
 }
 
 export const ELICITATION_DRAFT_SCHEMA_VERSION = 1 as const;
@@ -37,6 +47,7 @@ export function elicitationDraftKey(sessionId: string, requestId: string): strin
 export function readElicitationDraft(
 	sessionId: string,
 	requestId: string,
+	fingerprint: string,
 	storage: ElicitationDraftStorage | undefined = rendererStorage(),
 ): ElicitationDraft | undefined {
 	if (!storage) return undefined;
@@ -60,11 +71,15 @@ export function readElicitationDraft(
 	// treated as expired rather than trusted, independent of whether the
 	// once-per-run sweep has already run. Answers can carry sensitive values,
 	// so expiry must hold even when nothing else has written to this store.
-	if (!isFreshTimestamp(parsed.updatedAt, Date.now())) {
+	//
+	// A fingerprint mismatch is treated the same way: the request id was
+	// reused for a different question, so the stored answer belongs to a
+	// question that no longer exists, not to the one being asked now.
+	if (!isFreshTimestamp(parsed.updatedAt, Date.now()) || parsed.fingerprint !== fingerprint) {
 		try {
 			storage.removeItem(elicitationDraftKey(sessionId, requestId));
 		} catch {
-			// A leftover entry that cannot be removed still fails the timestamp check on the next read.
+			// A leftover entry that cannot be removed still fails this same check on the next read.
 		}
 		return undefined;
 	}
@@ -82,6 +97,7 @@ export function writeElicitationDraft(
 	sessionId: string,
 	requestId: string,
 	draft: ElicitationDraft,
+	fingerprint: string,
 	storage: ElicitationDraftStorage | undefined = rendererStorage(),
 ): void {
 	if (!storage) return;
@@ -90,6 +106,7 @@ export function writeElicitationDraft(
 		values: draft.values,
 		activeQuestion: draft.activeQuestion,
 		updatedAt: Date.now(),
+		fingerprint,
 	};
 	try {
 		storage.setItem(elicitationDraftKey(sessionId, requestId), JSON.stringify(stored));

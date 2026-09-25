@@ -14,6 +14,32 @@ import { ACCENT_ACTION_PILL, QUIET_ACTION_PILL } from "./action-pill";
 type InputAction = "accept" | "decline" | "cancel";
 type InputValue = string | number | boolean | string[];
 type PropertyEntry = [string, Record<string, unknown>];
+type ElicitationDraftKey = { sessionId: string; requestId: string; fingerprint: string };
+
+/**
+ * Identifies the question actually being asked, not just its request id.
+ * Request ids can repeat across unrelated questions (the legacy ACP
+ * transport numbers them from a per-process counter that restarts with the
+ * agent), so a saved draft is only trusted if this also matches — otherwise
+ * a stale answer could resurface pre-filled into a different question.
+ */
+/** Keeps a restored question index inside the bounds of the current question set. */
+function clampActiveQuestion(index: number, questionGroups: PropertyEntry[][] | undefined): number {
+	if (!questionGroups || questionGroups.length === 0) return 0;
+	if (!Number.isFinite(index)) return 0;
+	return Math.min(Math.max(index, 0), questionGroups.length - 1);
+}
+
+/** Exported for tests that need to read back a draft the dock itself wrote. */
+export function elicitationFingerprint(activity: ConversationActivity): string {
+	const schema = activity.detail?.schema;
+	const question = activity.detail?.message ?? (typeof schema?.title === "string" ? schema.title : undefined) ?? activity.summary ?? "";
+	const properties = Object.entries(schema?.properties ?? {});
+	const shape = properties
+		.map(([name, property]) => `${name}:${isRecord(property) && typeof property.title === "string" ? property.title : ""}`)
+		.join("|");
+	return `${question}::${shape}`;
+}
 
 /**
  * A pending question docks above the composer rather than landing in the
@@ -70,7 +96,11 @@ export function ElicitationDock({
 				<FormRequest
 					key={requestId ?? activity.id}
 					activity={activity}
-					draftKey={sessionId && requestId ? { sessionId, requestId } : undefined}
+					draftKey={
+						sessionId && requestId
+							? { sessionId, requestId, fingerprint: elicitationFingerprint(activity) }
+							: undefined
+					}
 					disabled={submitting || unavailable}
 					onResolve={resolve}
 				/>
@@ -189,7 +219,7 @@ function FormRequest({
 	onResolve,
 }: {
 	activity: ConversationActivity;
-	draftKey?: { sessionId: string; requestId: string };
+	draftKey?: ElicitationDraftKey;
 	disabled: boolean;
 	onResolve: (action: InputAction, content?: Record<string, unknown>) => Promise<void>;
 }) {
@@ -204,24 +234,33 @@ function FormRequest({
 	}, []);
 
 	const draft = useMemo(
-		() => (draftKey ? readElicitationDraft(draftKey.sessionId, draftKey.requestId) : undefined),
+		() =>
+			draftKey
+				? readElicitationDraft(draftKey.sessionId, draftKey.requestId, draftKey.fingerprint)
+				: undefined,
 		// The draft is read once per mount; later edits are written, not re-read.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-		[draftKey?.sessionId, draftKey?.requestId],
+		[draftKey?.sessionId, draftKey?.requestId, draftKey?.fingerprint],
 	);
 	const [values, setValues] = useState<Record<string, InputValue>>(() =>
 		restoreValues(initialValues(properties), draft?.values, properties),
 	);
 	const [missing, setMissing] = useState<Set<string>>(new Set());
-	const [activeQuestion, setActiveQuestion] = useState(draft?.activeQuestion ?? 0);
+	// A restored question index is clamped to the current question set: the
+	// index came from a draft the fingerprint check already trusts, but an
+	// out-of-range value would otherwise fall back to showing every field at
+	// once instead of the step-by-step flow.
+	const [activeQuestion, setActiveQuestion] = useState(() =>
+		clampActiveQuestion(draft?.activeQuestion ?? 0, questionGroups),
+	);
 	// Only a question the human actually touched is worth storing. A question
 	// merely shown — and perhaps cancelled by the agent — leaves nothing behind.
 	const [touched, setTouched] = useState(false);
 
 	useEffect(() => {
 		if (!draftKey || !touched) return;
-		writeElicitationDraft(draftKey.sessionId, draftKey.requestId, { values, activeQuestion });
-	}, [draftKey?.sessionId, draftKey?.requestId, touched, values, activeQuestion]);
+		writeElicitationDraft(draftKey.sessionId, draftKey.requestId, { values, activeQuestion }, draftKey.fingerprint);
+	}, [draftKey?.sessionId, draftKey?.requestId, draftKey?.fingerprint, touched, values, activeQuestion]);
 	const visibleProperties = questionGroups?.[activeQuestion] ?? properties;
 	const hasPreviousQuestion = questionGroups !== undefined && activeQuestion > 0;
 	const hasNextQuestion = questionGroups !== undefined && activeQuestion < questionGroups.length - 1;
@@ -302,6 +341,9 @@ function FormRequest({
 							className={QUIET_ACTION_PILL}
 							disabled={disabled}
 							onClick={() => {
+								// A restored draft with no edits yet still needs this saved:
+								// otherwise reopening the card lands back on the later question.
+								setTouched(true);
 								setMissing(new Set());
 								setActiveQuestion((current) => current - 1);
 							}}

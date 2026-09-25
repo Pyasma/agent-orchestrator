@@ -2,9 +2,9 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { aoBridge } from "../../lib/bridge";
-import { readElicitationDraft } from "../../lib/elicitation-drafts";
+import { elicitationDraftKey, readElicitationDraft, writeElicitationDraft } from "../../lib/elicitation-drafts";
 import type { ConversationActivity } from "../../types/conversation";
-import { ElicitationDock } from "./ElicitationDock";
+import { ElicitationDock, elicitationFingerprint } from "./ElicitationDock";
 
 function activity(detail: ConversationActivity["detail"]): ConversationActivity {
 	return {
@@ -209,20 +209,69 @@ describe("ElicitationDock", () => {
 
 		expect(screen.getByLabelText("Other approach")).toHaveValue("");
 		expect(screen.getByRole("radio", { name: /Native/ })).not.toBeChecked();
-		expect(readElicitationDraft("session-1", "request-2")?.values.question_0_custom).toBeUndefined();
+		const secondFingerprint = elicitationFingerprint({ ...first, id: "question-2", requestId: "request-2" });
+		expect(readElicitationDraft("session-1", "request-2", secondFingerprint)?.values.question_0_custom).toBeUndefined();
 	});
 
 	it("stores nothing for a question that was only shown", () => {
-		const view = render(
+		const shown = activity({ inputMode: "form", schema: claudeQuestions });
+		const view = render(<ElicitationDock activity={shown} sessionId="session-1" onResolve={vi.fn()} />);
+		view.unmount();
+
+		expect(readElicitationDraft("session-1", "request-1", elicitationFingerprint(shown))).toBeUndefined();
+	});
+
+	it("does not restore going Back with no other edits, so reopening lands on the later question", async () => {
+		const user = userEvent.setup();
+		const dock = (
 			<ElicitationDock
 				activity={activity({ inputMode: "form", schema: claudeQuestions })}
 				sessionId="session-1"
 				onResolve={vi.fn()}
-			/>,
+			/>
 		);
-		view.unmount();
+		const first = render(dock);
 
-		expect(readElicitationDraft("session-1", "request-1")).toBeUndefined();
+		await user.click(screen.getByRole("radio", { name: /Native/ }));
+		await user.click(screen.getByRole("button", { name: "Next" }));
+		await user.click(screen.getByRole("button", { name: "Back" }));
+		first.unmount();
+
+		render(dock);
+		expect(screen.getByRole("group", { name: /Approach/ })).toBeInTheDocument();
+	});
+
+	it("ignores a draft left by an earlier question that reused the same request id", async () => {
+		const shown = activity({ inputMode: "form", schema: claudeQuestions });
+		writeElicitationDraft(
+			"session-1",
+			"request-1",
+			{ values: { question_0: "Bridge", question_0_custom: "leftover from an old question" }, activeQuestion: 1 },
+			"a-different-question's-fingerprint",
+		);
+
+		render(<ElicitationDock activity={shown} sessionId="session-1" onResolve={vi.fn()} />);
+
+		expect(screen.getByRole("radio", { name: /Native/ })).not.toBeChecked();
+		expect(screen.getByRole("radio", { name: /Bridge/ })).not.toBeChecked();
+		expect(screen.getByRole("group", { name: /Approach/ })).toBeInTheDocument();
+		// The foreign entry is discarded outright rather than left for a future match.
+		expect(window.localStorage.getItem(elicitationDraftKey("session-1", "request-1"))).toBeNull();
+	});
+
+	it("clamps a restored question index that no longer fits the question set", () => {
+		const shown = activity({ inputMode: "form", schema: claudeQuestions });
+		writeElicitationDraft(
+			"session-1",
+			"request-1",
+			{ values: { question_0: "Native" }, activeQuestion: 99 },
+			elicitationFingerprint(shown),
+		);
+
+		render(<ElicitationDock activity={shown} sessionId="session-1" onResolve={vi.fn()} />);
+
+		// Falls back to the last real question, not to every field shown at once.
+		expect(screen.getByRole("group", { name: /Language/ })).toBeInTheDocument();
 	});
 
 	it("keeps generic MCP forms in the all-fields layout", () => {
