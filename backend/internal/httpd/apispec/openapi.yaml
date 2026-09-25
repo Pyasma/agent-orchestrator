@@ -13330,6 +13330,7 @@ components:
           enum:
           - psi
           - available_pct
+          - memorystatus
           type: string
         swapBytesPerSec:
           format: double
