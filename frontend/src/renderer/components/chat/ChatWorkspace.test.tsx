@@ -772,6 +772,22 @@ describe("ChatWorkspace timeline", () => {
 		expect(screen.queryByText("Choose a direction")).not.toBeInTheDocument();
 	});
 
+	it("persists a picked answer under the conversation's own draft and restores it after a remount", async () => {
+		// Nothing else exercises the conversationId prop actually reaching the
+		// dock: it's optional on ElicitationDock, so a dropped wire here would
+		// quietly turn off persistence while every dock-level test still passes,
+		// since those pass conversationId directly.
+		const user = userEvent.setup();
+		const snapshot = withUserInput("pending");
+		const first = render(<ChatWorkspace snapshot={snapshot} onResolveInput={vi.fn()} />);
+
+		await user.click(screen.getByRole("radio", { name: "ACP" }));
+		first.unmount();
+
+		render(<ChatWorkspace snapshot={snapshot} onResolveInput={vi.fn()} />);
+		expect(screen.getByRole("radio", { name: "ACP" })).toBeChecked();
+	});
+
 	it("does not interrupt while an elicitation is open", () => {
 		const onInterrupt = vi.fn();
 		const snapshot = structuredClone(chatFixture);

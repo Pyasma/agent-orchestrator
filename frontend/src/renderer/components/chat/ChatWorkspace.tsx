@@ -115,6 +115,7 @@ import { ActivityRun } from "./ActivityRun";
 import { TurnPlan } from "./TurnPlan";
 import { TurnSettingsBar } from "./TurnSettingsBar";
 import { ElicitationDock } from "./ElicitationDock";
+import { clearElicitationDraft } from "../../lib/elicitation-drafts";
 import { McpServerBanner, ReauthBanner, ThreadStateBanner } from "./ChatStatusBanners";
 import {
 	activeTurn,
@@ -1190,16 +1191,32 @@ function ChatWorkspaceContent({
 			) : undefined,
 		[busy, onDecide, stablePendingApproval],
 	);
+	// A question can stop being pending without this dock ever resolving it: a
+	// 30-minute approval wait times out, the agent is stopped or interrupted,
+	// another window or mobile answers it, or the controller fails. None of
+	// those paths call onResolve, so the draft this session saved for it would
+	// otherwise sit in storage untouched until its 7-day expiry. Whenever the
+	// pending request changes — including to nothing — drop the draft for
+	// whichever request id was pending a moment ago.
+	const previousPendingUserInputId = useRef<string | undefined>(undefined);
+	useEffect(() => {
+		const previous = previousPendingUserInputId.current;
+		const current = stablePendingUserInput?.requestId;
+		if (previous && previous !== current) clearElicitationDraft(snapshot.conversationId, previous);
+		previousPendingUserInputId.current = current;
+	}, [snapshot.conversationId, stablePendingUserInput?.requestId]);
 	const composerElicitation = useMemo(
 		() =>
 			stablePendingUserInput ? (
 				<ElicitationDock
+					key={stablePendingUserInput.requestId ?? stablePendingUserInput.id}
 					activity={stablePendingUserInput}
 					sessionId={snapshot.sessionId}
+					conversationId={snapshot.conversationId}
 					onResolve={onResolveInput}
 				/>
 			) : undefined,
-		[onResolveInput, snapshot.sessionId, stablePendingUserInput],
+		[onResolveInput, snapshot.conversationId, snapshot.sessionId, stablePendingUserInput],
 	);
 	const canSteerQueuedMessage =
 		Boolean(onSteer) && can(snapshot, "steer") && turn?.state === "running";

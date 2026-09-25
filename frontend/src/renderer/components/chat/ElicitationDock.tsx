@@ -1,44 +1,31 @@
-import { useEffect, useId, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ExternalLink, Loader2 } from "lucide-react";
 import { aoBridge } from "../../lib/bridge";
+import { setChatDraftBoundary } from "../../lib/chat-draft-boundary";
 import {
 	clearElicitationDraft,
 	pruneExpiredElicitationDraftsOnce,
 	readElicitationDraft,
 	writeElicitationDraft,
+	type ElicitationDraftValue,
 } from "../../lib/elicitation-drafts";
 import { cn } from "../../lib/utils";
 import type { ConversationActivity } from "../../types/conversation";
 import { ACCENT_ACTION_PILL, QUIET_ACTION_PILL } from "./action-pill";
 
 type InputAction = "accept" | "decline" | "cancel";
-type InputValue = string | number | boolean | string[];
+type InputValue = ElicitationDraftValue;
 type PropertyEntry = [string, Record<string, unknown>];
-type ElicitationDraftKey = { sessionId: string; requestId: string; fingerprint: string };
+type ElicitationDraftKey = { conversationId: string; requestId: string };
 
-/**
- * Identifies the question actually being asked, not just its request id.
- * Request ids can repeat across unrelated questions (the legacy ACP
- * transport numbers them from a per-process counter that restarts with the
- * agent), so a saved draft is only trusted if this also matches — otherwise
- * a stale answer could resurface pre-filled into a different question.
- */
 /** Keeps a restored question index inside the bounds of the current question set. */
 function clampActiveQuestion(index: number, questionGroups: PropertyEntry[][] | undefined): number {
 	if (!questionGroups || questionGroups.length === 0) return 0;
 	if (!Number.isFinite(index)) return 0;
-	return Math.min(Math.max(index, 0), questionGroups.length - 1);
-}
-
-/** Exported for tests that need to read back a draft the dock itself wrote. */
-export function elicitationFingerprint(activity: ConversationActivity): string {
-	const schema = activity.detail?.schema;
-	const question = activity.detail?.message ?? (typeof schema?.title === "string" ? schema.title : undefined) ?? activity.summary ?? "";
-	const properties = Object.entries(schema?.properties ?? {});
-	const shape = properties
-		.map(([name, property]) => `${name}:${isRecord(property) && typeof property.title === "string" ? property.title : ""}`)
-		.join("|");
-	return `${question}::${shape}`;
+	// A corrupted or hand-edited draft can carry a non-integer index; only a
+	// storage bug reaches this, but truncating keeps it from picking a
+	// questionGroups slot that doesn't exist.
+	return Math.min(Math.max(Math.trunc(index), 0), questionGroups.length - 1);
 }
 
 /**
@@ -51,11 +38,24 @@ export function elicitationFingerprint(activity: ConversationActivity): string {
 export function ElicitationDock({
 	activity,
 	sessionId,
+	conversationId,
 	onResolve,
 }: {
 	activity: ConversationActivity;
-	/** Scopes the in-progress answer so switching sessions does not discard it. */
+	/**
+	 * Scopes the "you have unsaved work" leave/quit warning, the same way the
+	 * Chat composer's own draft does — this is the session the human would be
+	 * navigating away from, regardless of which conversation is open on it.
+	 */
 	sessionId?: string;
+	/**
+	 * Scopes the persisted answer itself. The daemon identifies a pending
+	 * input by `(conversation_id, request_id)`, and a reviewer-chat overlay can
+	 * report the same `sessionId` as its underlying worker chat while reading
+	 * a different conversation, so the draft has to key on conversation, not
+	 * session, to land back on the right question.
+	 */
+	conversationId?: string;
 	onResolve?: (
 		requestId: string,
 		action: InputAction,
@@ -73,10 +73,15 @@ export function ElicitationDock({
 		setError(undefined);
 		try {
 			await onResolve(requestId, action, content);
-			if (sessionId) clearElicitationDraft(sessionId, requestId);
+			if (conversationId) clearElicitationDraft(conversationId, requestId);
+			if (sessionId) setChatDraftBoundary(sessionId, "elicitation", undefined);
+			// Leave the form disabled on success rather than resetting `submitting`
+			// here: `onResolve`'s conversation refetch is fire-and-forget, so this
+			// question can still be on screen for a beat after it resolves. A
+			// re-enabled form invites a stray edit that would recreate the draft
+			// just cleared above.
 		} catch (reason) {
 			setError(reason instanceof Error ? reason.message : "The answer could not be sent.");
-		} finally {
 			setSubmitting(false);
 		}
 	}
@@ -91,16 +96,16 @@ export function ElicitationDock({
 			{activity.detail?.inputMode === "url" ? (
 				<URLRequest activity={activity} disabled={submitting || unavailable} onResolve={resolve} />
 			) : (
-				// Keyed by request: a new question replaces the dock's form outright
-				// instead of inheriting the previous one's answers.
+				// Keyed by request: a new question replaces the form outright instead
+				// of inheriting the previous one's answers. ChatWorkspace also keys
+				// the whole ElicitationDock by request id, which additionally resets
+				// `error`/`submitting` above — this key stays so the same guarantee
+				// holds for a caller that reuses one ElicitationDock across requests.
 				<FormRequest
 					key={requestId ?? activity.id}
 					activity={activity}
-					draftKey={
-						sessionId && requestId
-							? { sessionId, requestId, fingerprint: elicitationFingerprint(activity) }
-							: undefined
-					}
+					sessionId={sessionId}
+					draftKey={conversationId && requestId ? { conversationId, requestId } : undefined}
 					disabled={submitting || unavailable}
 					onResolve={resolve}
 				/>
@@ -214,11 +219,13 @@ function URLRequest({
 
 function FormRequest({
 	activity,
+	sessionId,
 	draftKey,
 	disabled,
 	onResolve,
 }: {
 	activity: ConversationActivity;
+	sessionId?: string;
 	draftKey?: ElicitationDraftKey;
 	disabled: boolean;
 	onResolve: (action: InputAction, content?: Record<string, unknown>) => Promise<void>;
@@ -233,14 +240,12 @@ function FormRequest({
 		pruneExpiredElicitationDraftsOnce();
 	}, []);
 
-	const draft = useMemo(
-		() =>
-			draftKey
-				? readElicitationDraft(draftKey.sessionId, draftKey.requestId, draftKey.fingerprint)
-				: undefined,
-		// The draft is read once per mount; later edits are written, not re-read.
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-		[draftKey?.sessionId, draftKey?.requestId, draftKey?.fingerprint],
+	// A lazy initializer is "read once per mount": React never re-invokes it on
+	// a later render, so this needs no dependency array and no effect. Re-running
+	// it on every `draftKey` change would also re-trigger its delete-on-mismatch
+	// side effect during render, which only the initial mount should ever do.
+	const [draft] = useState(() =>
+		draftKey ? readElicitationDraft(draftKey.conversationId, draftKey.requestId) : undefined,
 	);
 	const [values, setValues] = useState<Record<string, InputValue>>(() =>
 		restoreValues(initialValues(properties), draft?.values, properties),
@@ -253,14 +258,33 @@ function FormRequest({
 	const [activeQuestion, setActiveQuestion] = useState(() =>
 		clampActiveQuestion(draft?.activeQuestion ?? 0, questionGroups),
 	);
-	// Only a question the human actually touched is worth storing. A question
-	// merely shown — and perhaps cancelled by the agent — leaves nothing behind.
-	const [touched, setTouched] = useState(false);
+	// Tracks what was last written (or the initial, unwritten state) so a write
+	// only happens when something actually changed. A boolean "was this ever
+	// touched" flag needs every state-changing handler to remember to set it —
+	// Back already forgot once — where comparing against the last write can't be
+	// missed by a future handler. Comparing against the *initial* state instead
+	// of the last write wouldn't work either: restore at question 0, go Next,
+	// then Back lands back on question 0, which looks unchanged from the start
+	// but must still overwrite the draft that Next just saved at question 1.
+	const lastWritten = useRef({ values, activeQuestion });
 
 	useEffect(() => {
-		if (!draftKey || !touched) return;
-		writeElicitationDraft(draftKey.sessionId, draftKey.requestId, { values, activeQuestion }, draftKey.fingerprint);
-	}, [draftKey?.sessionId, draftKey?.requestId, draftKey?.fingerprint, touched, values, activeQuestion]);
+		if (!draftKey) return;
+		if (lastWritten.current.activeQuestion === activeQuestion && valuesEqual(lastWritten.current.values, values)) return;
+		const result = writeElicitationDraft(draftKey.conversationId, draftKey.requestId, { values, activeQuestion });
+		lastWritten.current = { values, activeQuestion };
+		// Reported the same way a failed composer or queued-edit write is: a
+		// silently dropped write here is exactly the bug this module exists to
+		// prevent, so the leave/quit guard needs to know about it too.
+		if (sessionId) setChatDraftBoundary(sessionId, "elicitation", result.ok ? undefined : "persistence-failed");
+	}, [draftKey?.conversationId, draftKey?.requestId, sessionId, values, activeQuestion]);
+
+	useEffect(
+		() => () => {
+			if (sessionId) setChatDraftBoundary(sessionId, "elicitation", undefined);
+		},
+		[sessionId],
+	);
 	const visibleProperties = questionGroups?.[activeQuestion] ?? properties;
 	const hasPreviousQuestion = questionGroups !== undefined && activeQuestion > 0;
 	const hasNextQuestion = questionGroups !== undefined && activeQuestion < questionGroups.length - 1;
@@ -285,7 +309,6 @@ function FormRequest({
 		setMissing(absent);
 		if (absent.size > 0) return;
 		if (hasNextQuestion) {
-			setTouched(true);
 			setActiveQuestion((current) => current + 1);
 			return;
 		}
@@ -313,7 +336,6 @@ function FormRequest({
 						labelledBy={questionGroups && index === 0 ? headerId : undefined}
 						rows={Boolean(questionGroups)}
 						onChange={(value) => {
-							setTouched(true);
 							setValues((current) => ({ ...current, [name]: value }));
 							setMissing((current) => {
 								if (!current.has(name)) return current;
@@ -341,9 +363,6 @@ function FormRequest({
 							className={QUIET_ACTION_PILL}
 							disabled={disabled}
 							onClick={() => {
-								// A restored draft with no edits yet still needs this saved:
-								// otherwise reopening the card lands back on the later question.
-								setTouched(true);
 								setMissing(new Set());
 								setActiveQuestion((current) => current - 1);
 							}}
@@ -652,6 +671,21 @@ function safeExternalURL(raw: string): URL | undefined {
 	} catch {
 		return undefined;
 	}
+}
+
+/** Shallow-equal over the answer map, treating arrays (multi-select) by content, not identity. */
+function valuesEqual(a: Record<string, InputValue>, b: Record<string, InputValue>): boolean {
+	const keys = Object.keys(a);
+	if (keys.length !== Object.keys(b).length) return false;
+	return keys.every((key) => {
+		const left = a[key];
+		const right = b[key];
+		if (Array.isArray(left) || Array.isArray(right)) {
+			return Array.isArray(left) && Array.isArray(right) && left.length === right.length &&
+				left.every((item, index) => item === right[index]);
+		}
+		return left === right;
+	});
 }
 
 function toggleValue(values: string[], value: string): string[] {
