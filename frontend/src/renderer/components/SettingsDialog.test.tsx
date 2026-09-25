@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,7 +6,7 @@ import { useUiStore } from "../stores/ui-store";
 import type { ProjectSettingsSaveState } from "./ProjectSettingsForm";
 import { SettingsDialog } from "./SettingsDialog";
 
-const { postMock } = vi.hoisted(() => ({ postMock: vi.fn() }));
+const { postMock, getMock } = vi.hoisted(() => ({ postMock: vi.fn(), getMock: vi.fn() }));
 
 const accountsResponse = {
 	accountRevision: 0,
@@ -16,7 +16,7 @@ const accountsResponse = {
 };
 
 vi.mock("../lib/api-client", () => ({
-	apiClient: { POST: postMock },
+	apiClient: { POST: postMock, GET: getMock },
 	apiErrorCode: (error: { code?: string }) => error?.code,
 	apiErrorMessage: () => "request failed",
 	hasTrustedApiBaseUrl: () => true,
@@ -71,6 +71,11 @@ describe("SettingsDialog", () => {
 		postMock.mockReset().mockImplementation((path: string) => path === "/api/v1/agents/codex/accounts/ensure"
 			? Promise.resolve({ data: accountsResponse })
 			: Promise.resolve({ data: { operationId: "login-1", status: "cancelled" } }));
+		getMock.mockReset().mockImplementation((path: string) => {
+			if (path === "/api/v1/agents/installers") return Promise.resolve({ data: { agents: [] } });
+			if (path === "/api/v1/agents/install-jobs") return Promise.resolve({ data: { jobs: [] } });
+			return Promise.resolve({ data: undefined });
+		});
 		useUiStore.setState({ settingsModal: null });
 	});
 
@@ -120,6 +125,40 @@ describe("SettingsDialog", () => {
 		expect(form).toHaveAttribute("data-focus-agent", "claude-code");
 		expect(screen.getByRole("button", { name: "Harness" })).toHaveAttribute("aria-current", "page");
 		expect(screen.getByRole("button", { name: "Subscriptions" })).not.toHaveAttribute("aria-current", "page");
+	});
+
+	it("badges the Harness nav item when an installed harness has a newer version", async () => {
+		getMock.mockImplementation((path: string) => {
+			if (path === "/api/v1/agents/installers") {
+				return Promise.resolve({
+					data: {
+						agents: [{
+							agentId: "claude-code", available: true, automatic: true, method: "homebrew",
+							command: "brew install --cask claude-code", documentationUrl: "https://code.claude.com/docs/en/installation",
+							methods: [{ id: "homebrew", label: "Homebrew", available: true, recommended: true, command: "brew install --cask claude-code", reinstallAvailable: true, latestVersion: "2.0.0" }],
+						}],
+					},
+				});
+			}
+			if (path === "/api/v1/agents/install-jobs") {
+				return Promise.resolve({ data: { jobs: [{ target: "claude-code", status: "succeeded", method: "homebrew", version: "1.0.0" }] } });
+			}
+			return Promise.resolve({ data: undefined });
+		});
+		useUiStore.getState().openGlobalSettings("general");
+		renderSettingsDialog();
+
+		const harnessButton = await screen.findByRole("button", { name: "Harness" });
+		await vi.waitFor(() => expect(within(harnessButton).getByTestId("settings-nav-badge")).toBeInTheDocument());
+	});
+
+	it("does not badge the Harness nav item when nothing has a known update", async () => {
+		useUiStore.getState().openGlobalSettings("general");
+		renderSettingsDialog();
+
+		const harnessButton = await screen.findByRole("button", { name: "Harness" });
+		await vi.waitFor(() => expect(getMock).toHaveBeenCalledWith("/api/v1/agents/installers"));
+		expect(within(harnessButton).queryByTestId("settings-nav-badge")).not.toBeInTheDocument();
 	});
 
 	it("does not replay the Harness focus target after navigating away during the same modal opening", async () => {

@@ -22,6 +22,7 @@ import { type GlobalSettingsSection, type SettingsModal, useUiStore } from "../s
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
 import { globalSettingsItem, visibleGlobalSettings } from "./settings/settingsCatalog";
+import { useHarnessUpdatesAvailable } from "./settings/HarnessSettingsSection";
 
 function initialProjectSaveState(): ProjectSettingsSaveState {
 	return { phase: "idle" };
@@ -58,6 +59,7 @@ function SettingsDialogLayer({ settingsModal }: { settingsModal: SettingsModal }
 	const isBodyReady = bodySettings === displaySettings;
 
 	const globalSections = visibleGlobalSettings({ cloudEnabled });
+	const harnessUpdatesAvailable = useHarnessUpdatesAvailable();
 
 	const projectSections: Array<{ id: ProjectSettingsSection; label: string; icon: LucideIcon }> = [
 		{ id: "general", label: t("settings.project.identity"), icon: MonitorCog },
@@ -184,6 +186,7 @@ function SettingsDialogLayer({ settingsModal }: { settingsModal: SettingsModal }
 								: globalSections.map(({ id, label, icon }) => (
 										<SettingsNavItem
 											active={activeSection === id}
+											badge={id === "harness" && harnessUpdatesAvailable}
 											icon={icon}
 											key={id}
 											label={label(t)}
@@ -289,12 +292,14 @@ function SettingsDialogLayer({ settingsModal }: { settingsModal: SettingsModal }
 
 function SettingsNavItem({
 	active,
+	badge,
 	disabled,
 	icon: Icon,
 	label,
 	onClick,
 }: {
 	active: boolean;
+	badge?: boolean;
 	disabled?: boolean;
 	icon: LucideIcon;
 	label: string;
@@ -313,7 +318,10 @@ function SettingsNavItem({
 			onClick={onClick}
 			type="button"
 		>
-			<Icon aria-hidden="true" className="size-4 shrink-0" />
+			<span className="relative flex shrink-0">
+				<Icon aria-hidden="true" className="size-4" />
+				{badge ? <span aria-hidden="true" className="absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-accent" data-testid="settings-nav-badge" /> : null}
+			</span>
 			{label}
 		</button>
 	);

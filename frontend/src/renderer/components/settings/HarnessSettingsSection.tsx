@@ -29,8 +29,8 @@ import { SettingsOptionMenu } from "./SettingsOptionMenu";
 type AgentInstallPlan = components["schemas"]["AgentInstallPlan"];
 type InstallJob = components["schemas"]["InstallJob"];
 
-const installerQueryKey = ["agent-installers"] as const;
-const installJobsQueryKey = ["agent-install-jobs"] as const;
+export const installerQueryKey = ["agent-installers"] as const;
+export const installJobsQueryKey = ["agent-install-jobs"] as const;
 const POLL_INTERVAL_MS = 1_000;
 const AUTH_TERMINAL_LIFETIME_MS = 15 * 60_000;
 const FOCUS_HIGHLIGHT_MS = 2_000;
@@ -69,16 +69,34 @@ async function closeAuthTerminal(handleId: string): Promise<void> {
 	}
 }
 
-async function fetchInstallers(): Promise<AgentInstallPlan[]> {
+export async function fetchInstallers(): Promise<AgentInstallPlan[]> {
 	const { data, error } = await apiClient.GET("/api/v1/agents/installers");
 	if (error || !data) throw new Error(apiErrorMessage(error, "Could not load harness installers."));
 	return data.agents;
 }
 
-async function fetchInstallJobs(): Promise<InstallJob[]> {
+export async function fetchInstallJobs(): Promise<InstallJob[]> {
 	const { data, error } = await apiClient.GET("/api/v1/agents/install-jobs");
 	if (error || !data) throw new Error(apiErrorMessage(error, "Could not load harness installation jobs."));
 	return data.jobs;
+}
+
+// useHarnessUpdatesAvailable is a lightweight summary for chrome outside this
+// section (the Settings nav item): does any installed harness have a newer
+// version than what's recorded on its last install job? Shares its query
+// cache with the full section via the same query keys, so opening Settings
+// never double-fetches.
+export function useHarnessUpdatesAvailable(): boolean {
+	const installers = useQuery({ queryKey: installerQueryKey, queryFn: fetchInstallers, staleTime: 60_000 });
+	const jobs = useQuery({ queryKey: installJobsQueryKey, queryFn: fetchInstallJobs, retry: false });
+	return useMemo(() => {
+		const jobByTarget = new Map(jobs.data?.map((job) => [job.target, job]) ?? []);
+		return (installers.data ?? []).some((plan) => {
+			const job = jobByTarget.get(plan.agentId);
+			const installedMethod = plan.methods.find((method) => method.id === job?.method);
+			return Boolean(job?.version && installedMethod?.latestVersion && installedMethod.latestVersion !== job.version);
+		});
+	}, [installers.data, jobs.data]);
 }
 
 function upsertJob(current: InstallJob[] | undefined, next: InstallJob): InstallJob[] {
@@ -292,16 +310,17 @@ export function HarnessSettingsSection({
 		setPendingAgentIds(new Set(pendingActions.current));
 	};
 
-	const startInstall = async (agentId: AgentId, method: string) => {
+	const startInstall = async (agentId: AgentId, method: string, operation: "install" | "reinstall" = "install") => {
 		if (!beginAction(agentId)) return;
 		setActionErrors((current) => ({ ...current, [agentId]: undefined }));
 		try {
 			const { data, error } = await apiClient.POST("/api/v1/agents/{agent}/install", {
 				params: { path: { agent: agentId } },
-				body: { method, operation: "install" },
+				body: { method, operation },
 			});
 			if (error || !data) {
-				setActionErrors((current) => ({ ...current, [agentId]: apiErrorMessage(error, t("settings.harness.startFailed")) }));
+				const fallback = operation === "reinstall" ? t("settings.harness.updateFailed") : t("settings.harness.startFailed");
+				setActionErrors((current) => ({ ...current, [agentId]: apiErrorMessage(error, fallback) }));
 				return;
 			}
 			updateJob(data);
@@ -572,6 +591,16 @@ export function HarnessSettingsSection({
 				<span className="inline-flex items-center gap-1.5 text-xs text-settings-muted" role="status"><LoaderCircle className="size-4 animate-spin" aria-hidden="true" />{job?.status === "installing" ? t("settings.harness.installing") : t("settings.harness.verifying")}</span>
 							) : isInstalled ? (
 								<div className="flex shrink-0 items-center gap-2">
+								{updateAvailable && installedMethod?.reinstallAvailable ? (
+									<Button
+										size="sm"
+										variant="outline"
+										disabled={pending}
+										onClick={() => void startInstall(agentId, installedMethod.id, "reinstall")}
+									>
+										{t("settings.harness.updateTo", { version: latestVersion })}
+									</Button>
+								) : null}
 								{showInstallationStatus ? <Button
 					type="button"
 					size="none"

@@ -563,6 +563,58 @@ describe("HarnessSettingsSection", () => {
 		expect(within(cursorRow).queryByRole("button", { name: "Instructions" })).not.toBeInTheDocument();
 	});
 
+	it("offers a one-click update when a newer version is known, and starts it as a reinstall", async () => {
+		vi.mocked(apiClient.GET).mockImplementation(async (path) => {
+			if (path === "/api/v1/agents/readiness") return { data: catalogWithInstalled("claude-code") } as never;
+			if (path === "/api/v1/agents/installers") {
+				return {
+					data: {
+						agents: [{
+							...plans.agents[0],
+							methods: [{ ...plans.agents[0].methods[0], latestVersion: "2.0.0" }],
+						}],
+					},
+				} as never;
+			}
+			if (path === "/api/v1/agents/install-jobs") {
+				return { data: { jobs: [{ target: "claude-code", status: "succeeded", method: "homebrew", version: "1.0.0" }] } } as never;
+			}
+			return { data: undefined } as never;
+		});
+		vi.mocked(apiClient.POST).mockImplementation(async (path) => {
+			if (path === "/api/v1/agents/{agent}/install") {
+				return { data: { target: "claude-code", status: "installing", method: "homebrew" } } as never;
+			}
+			return { data: undefined } as never;
+		});
+		const user = userEvent.setup();
+		renderSection();
+		const row = (await screen.findByText("Claude Code")).closest('[data-agent="claude-code"]') as HTMLElement;
+		await waitFor(() => expect(row).toHaveTextContent("v2.0.0 available"));
+
+		await user.click(within(row).getByRole("button", { name: "Update to v2.0.0" }));
+
+		await waitFor(() => expect(apiClient.POST).toHaveBeenCalledWith("/api/v1/agents/{agent}/install", {
+			params: { path: { agent: "claude-code" } },
+			body: { method: "homebrew", operation: "reinstall" },
+		}));
+	});
+
+	it("does not offer an update when the installed method has no known latest version", async () => {
+		vi.mocked(apiClient.GET).mockImplementation(async (path) => {
+			if (path === "/api/v1/agents/readiness") return { data: catalogWithInstalled("claude-code") } as never;
+			if (path === "/api/v1/agents/installers") return { data: plans } as never;
+			if (path === "/api/v1/agents/install-jobs") {
+				return { data: { jobs: [{ target: "claude-code", status: "succeeded", method: "homebrew", version: "1.0.0" }] } } as never;
+			}
+			return { data: undefined } as never;
+		});
+		renderSection();
+		const row = (await screen.findByText("Claude Code")).closest('[data-agent="claude-code"]') as HTMLElement;
+		await waitFor(() => expect(row).toHaveTextContent("v1.0.0"));
+		expect(within(row).queryByRole("button", { name: /^Update to/ })).not.toBeInTheDocument();
+	});
+
 	it("starts an official vendor installer with one click and no instructions dialog", async () => {
 		vi.mocked(apiClient.POST).mockImplementation(async (path) => {
 			if (path === "/api/v1/agents/{agent}/install") {
