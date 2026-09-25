@@ -1895,6 +1895,7 @@
 	"settings.harness.verifyAgain": "Verify again",
 	"settings.harness.verifying": "Verifying…",
 	"settings.harness.version": "v{{version}}",
+	"settings.harness.updateAvailable": "v{{version}} available",
 	"settings.navSectionsAria": "Settings sections",
 	"settings.project.workflow": "Workflow",
 	"settings.project.intake": "Intake",

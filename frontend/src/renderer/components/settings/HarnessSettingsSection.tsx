@@ -481,6 +481,9 @@ export function HarnessSettingsSection({
 					const recommendedMethod = availableMethods.find((method) => method.recommended) ?? availableMethods[0];
 					const selectedMethodId = selectedMethods[agentId] ?? (availableMethods.some((method) => method.id === job?.method) ? job?.method : recommendedMethod?.id) ?? "";
 					const selectedMethod = availableMethods.find((method) => method.id === selectedMethodId);
+					const installedMethod = plan?.methods.find((method) => method.id === job?.method);
+					const latestVersion = installedMethod?.latestVersion;
+					const updateAvailable = Boolean(isInstalled && job?.version && latestVersion && latestVersion !== job.version);
 					const pending = pendingAgentIds.has(agentId);
 					const actionError = actionErrors[agentId];
 					const failed = job?.status === "failed" || job?.status === "unsupported" || job?.status === "interrupted" || Boolean(actionError);
@@ -561,6 +564,7 @@ export function HarnessSettingsSection({
 								<p className={cn("truncate text-xs text-settings-muted", rowHasError && "text-error")} title={authState?.error ?? actionError ?? job?.error ?? authPlan?.reason ?? plan?.reason}>
 									{isInstalled ? authSummary : installationPending ? t("settings.harness.installationUnknown") : actionError ?? (job?.status === "interrupted" ? t("settings.harness.interrupted") : failed ? (job?.error ?? t("settings.harness.installFailed")) : plan?.available ? t("settings.harness.availableWith", { method: availableMethodsLabel }) : (plan?.reason ?? t("settings.harness.manualRequired")))}
 									{isInstalled && job?.version ? ` · ${t("settings.harness.version", { version: job.version })}` : null}
+									{updateAvailable ? ` · ${t("settings.harness.updateAvailable", { version: latestVersion })}` : null}
 								</p>
 							</div>
 

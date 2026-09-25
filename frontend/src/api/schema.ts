@@ -2782,6 +2782,9 @@ export interface components {
             expectedDestination?: string;
             id: string;
             label: string;
+            latestVersion?: string;
+            /** Format: date-time */
+            latestVersionCheckedAt?: null | string;
             reason?: string;
             recommended: boolean;
             reinstallAvailable: boolean;

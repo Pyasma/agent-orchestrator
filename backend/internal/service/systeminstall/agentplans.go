@@ -350,7 +350,7 @@ func (s *Service) planUV(target Target, pkg string) Plan {
 	if _, err := s.executables.LookPath("uv"); err != nil {
 		return Plan{Target: target, Unsupported: true, Method: "uv", Reason: "uv was not found on PATH. Install uv, then retry."}
 	}
-	return Plan{Target: target, Method: "uv", Command: []string{"uv", "tool", "install", pkg}}
+	return Plan{Target: target, Method: "uv", Command: []string{"uv", "tool", "install", pkg}, PackageRegistry: "pypi", PackageName: pkg}
 }
 
 func (s *Service) planBun(target Target) Plan {
@@ -358,14 +358,14 @@ func (s *Service) planBun(target Target) Plan {
 	if _, err := s.executables.LookPath("bun"); err != nil {
 		return Plan{Target: target, Unsupported: true, Method: "bun", Reason: "Bun was not found on PATH."}
 	}
-	return Plan{Target: target, Method: "bun", Command: []string{"bun", "install", "-g", pkg}}
+	return Plan{Target: target, Method: "bun", Command: []string{"bun", "install", "-g", pkg}, PackageRegistry: "npm", PackageName: npmPackageName(pkg)}
 }
 
 func (s *Service) planPipx(target Target, pkg string) Plan {
 	if _, err := s.executables.LookPath("pipx"); err != nil {
 		return Plan{Target: target, Unsupported: true, Method: "pipx", Reason: "pipx was not found on PATH. Install pipx, then retry."}
 	}
-	return Plan{Target: target, Method: "pipx", Command: []string{"pipx", "install", pkg}}
+	return Plan{Target: target, Method: "pipx", Command: []string{"pipx", "install", pkg}, PackageRegistry: "pypi", PackageName: pkg}
 }
 
 func manualPlan(target Target, reason, docsURL string) Plan {

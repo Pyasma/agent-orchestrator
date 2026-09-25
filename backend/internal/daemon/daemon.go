@@ -56,6 +56,7 @@ import (
 	devimportsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/devimport"
 	fsbrowsersvc "github.com/aoagents/agent-orchestrator/backend/internal/service/fsbrowser"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/githubpat"
+	"github.com/aoagents/agent-orchestrator/backend/internal/service/harnessupdate"
 	importsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/importer"
 	linkpreviewsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/linkpreview"
 	notificationsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/notification"
@@ -592,10 +593,12 @@ func Run() error {
 
 	hostCommands := systemexec.New(cfg.DataDir)
 	systemChecks := systemcheck.NewWithCommandRunner(agentSvc, hostCommands, hostCommands)
+	harnessLatestVersions := harnessupdate.New(&http.Client{}, store)
 	systemInstall := systeminstall.NewWithDeps(hostCommands, hostCommands, systeminstall.Deps{
-		JobStore: store,
-		Verifier: systeminstall.NewVerifier(agents, hostCommands),
-		Sessions: store,
+		JobStore:             store,
+		Verifier:             systeminstall.NewVerifier(agents, hostCommands),
+		Sessions:             store,
+		LatestVersionChecker: harnessLatestVersions,
 	})
 	if err := systemInstall.Recover(ctx); err != nil {
 		stop()

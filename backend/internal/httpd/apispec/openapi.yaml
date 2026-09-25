@@ -8107,6 +8107,13 @@ components:
           type: string
         label:
           type: string
+        latestVersion:
+          type: string
+        latestVersionCheckedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
         reason:
           type: string
         recommended:

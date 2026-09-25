@@ -1133,6 +1133,7 @@
 	"settings.harness.verifyAgain": "Verify again",
 	"settings.harness.verifying": "Verifying…",
 	"settings.harness.version": "v{{version}}",
+	"settings.harness.updateAvailable": "v{{version}} available",
 	"settings.navSectionsAria": "Settings sections",
 	"settings.keyboardShortcuts": "Keyboard shortcuts",
 	"settings.language": "Language",

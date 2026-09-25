@@ -21,6 +21,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/service/harnessupdate"
 )
 
 var (
@@ -160,6 +161,13 @@ type Plan struct {
 	Method              string
 	DocsURL             string
 	ExpectedDestination string
+	// PackageRegistry/PackageName identify where AO can ask what the latest
+	// published version of this harness is: "npm", "homebrew-formula",
+	// "homebrew-cask", or "pypi", paired with the exact package/formula/cask
+	// name from this recipe. Empty when this method's distribution channel
+	// has no queryable public registry (a vendor install script, winget).
+	PackageRegistry string
+	PackageName     string
 }
 
 // AgentPlan is the display-safe plan returned to the settings page. Command is
@@ -189,6 +197,13 @@ type AgentInstallMethod struct {
 	ReinstallAvailable  bool   `json:"reinstallAvailable"`
 	ReinstallCommand    string `json:"reinstallCommand,omitempty"`
 	ReinstallReason     string `json:"reinstallReason,omitempty"`
+	// LatestVersion is the newest published version AO has cached for this
+	// method's package registry, when one is known. Empty means either no
+	// registry is queryable for this method or nothing has been cached yet —
+	// the two are indistinguishable to the client, which is correct: neither
+	// case has anything to show.
+	LatestVersion          string     `json:"latestVersion,omitempty"`
+	LatestVersionCheckedAt *time.Time `json:"latestVersionCheckedAt,omitempty"`
 }
 
 // AgentOperation distinguishes a first installation from an explicit rebuild
@@ -270,11 +285,19 @@ type SessionLister interface {
 	ListAllSessions(ctx context.Context) ([]domain.SessionRecord, error)
 }
 
+// LatestVersionChecker resolves the newest published version AO has cached
+// for one package registry+name pair. ok is false when nothing is cached yet
+// (a background refresh may be in flight) — never a blocking call.
+type LatestVersionChecker interface {
+	Latest(ctx context.Context, registry, name string) (harnessupdate.Latest, bool)
+}
+
 // Deps are the durable and adapter-backed dependencies used for harness jobs.
 type Deps struct {
-	JobStore ports.AgentInstallJobStore
-	Verifier HarnessVerifier
-	Sessions SessionLister
+	JobStore             ports.AgentInstallJobStore
+	Verifier             HarnessVerifier
+	Sessions             SessionLister
+	LatestVersionChecker LatestVersionChecker
 }
 
 // Service runs real install commands for the fixed Target allowlist.
@@ -295,6 +318,7 @@ type Service struct {
 	jobStore            ports.AgentInstallJobStore
 	verifier            HarnessVerifier
 	sessions            SessionLister
+	latestVersions      LatestVersionChecker
 	// goos selects the platform branch in planFor. Real use is always
 	// runtime.GOOS; tests override it to exercise every OS branch from one
 	// machine, the same seam lookPath provides for PATH probing.
@@ -360,6 +384,7 @@ func NewWithDeps(executables ports.ExecutableFinder, commands ports.CommandRunne
 		jobStore:            deps.JobStore,
 		verifier:            deps.Verifier,
 		sessions:            deps.Sessions,
+		latestVersions:      deps.LatestVersionChecker,
 		goos:                runtime.GOOS,
 		installTimeout:      defaultInstallTimeout,
 		persistenceTimeout:  defaultPersistenceTimeout,
@@ -391,14 +416,22 @@ func (s *Service) AgentPlans(ctx context.Context) ([]AgentPlan, error) {
 		methods := make([]AgentInstallMethod, 0, len(plans))
 		for index, methodPlan := range plans {
 			reinstallPlan := reinstallByMethod[methodPlan.Method]
-			methods = append(methods, AgentInstallMethod{
+			method := AgentInstallMethod{
 				ID: methodPlan.Method, Label: installMethodLabel(methodPlan.Method),
 				Available: !methodPlan.Unsupported, Recommended: index == recommended,
 				Command: displayCommand(methodPlan), Reason: methodPlan.Reason,
 				ExpectedDestination: methodPlan.ExpectedDestination,
 				ReinstallAvailable:  !reinstallPlan.Unsupported,
 				ReinstallCommand:    displayCommand(reinstallPlan), ReinstallReason: reinstallPlan.Reason,
-			})
+			}
+			if s.latestVersions != nil && methodPlan.PackageRegistry != "" {
+				if latest, ok := s.latestVersions.Latest(ctx, methodPlan.PackageRegistry, methodPlan.PackageName); ok {
+					method.LatestVersion = latest.Version
+					checkedAt := latest.CheckedAt
+					method.LatestVersionCheckedAt = &checkedAt
+				}
+			}
+			methods = append(methods, method)
 		}
 		out = append(out, AgentPlan{
 			AgentID: string(target), Available: !plan.Unsupported,
@@ -1208,7 +1241,7 @@ func (p requestPlanner) planNPM(target Target, pkg string) Plan {
 			Method: "npm", Reason: "npm was not found on PATH. Install Node.js from https://nodejs.org first, then retry.",
 		}
 	}
-	plan := Plan{Target: target, Command: []string{"npm", "install", "-g", pkg}, Method: "npm"}
+	plan := Plan{Target: target, Command: []string{"npm", "install", "-g", pkg}, Method: "npm", PackageRegistry: "npm", PackageName: npmPackageName(pkg)}
 	if IsAgentTarget(target) {
 		if p.capabilities == nil || p.capabilities.NPM.Err != nil {
 			plan.Unsupported = true
@@ -1247,6 +1280,18 @@ func (p requestPlanner) planNPM(target Target, pkg string) Plan {
 		}
 	}
 	return plan
+}
+
+// npmPackageName strips a trailing "@<tag>" version/dist-tag pin (as in
+// "opencode-ai@latest" or "@qwen-code/qwen-code@latest") so the remaining
+// string is a bare package name the npm registry API accepts. A scoped
+// package's own leading "@scope/" is left alone: only an "@" after the first
+// character is treated as a tag separator.
+func npmPackageName(pkg string) string {
+	if at := strings.LastIndexByte(pkg, '@'); at > 0 {
+		return pkg[:at]
+	}
+	return pkg
 }
 
 func minimumNodeVersionForTarget(target Target) [3]int {
@@ -1374,7 +1419,18 @@ func (p requestPlanner) planHomebrew(target Target, pkg string, cask bool) Plan 
 		command = append(command, "--cask")
 	}
 	command = append(command, pkg)
-	return Plan{Target: target, Command: command, Method: "homebrew"}
+	plan := Plan{Target: target, Command: command, Method: "homebrew"}
+	// A third-party tap ("owner/tap/formula") isn't in Homebrew's public
+	// formulae.brew.sh API, which only indexes homebrew-core and
+	// homebrew-cask. Only a bare name has a queryable latest version.
+	if !strings.Contains(pkg, "/") {
+		if cask {
+			plan.PackageRegistry, plan.PackageName = "homebrew-cask", pkg
+		} else {
+			plan.PackageRegistry, plan.PackageName = "homebrew-formula", pkg
+		}
+	}
+	return plan
 }
 
 func homebrewPackageInstalled(inventory map[string]bool, pkg string) bool {

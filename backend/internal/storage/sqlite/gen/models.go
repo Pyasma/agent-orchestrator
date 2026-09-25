@@ -349,6 +349,13 @@ type ConversationTurn struct {
 	HandledByReviewID    sql.NullString
 }
 
+type HarnessLatestVersion struct {
+	Registry  string
+	Name      string
+	Version   string
+	CheckedAt time.Time
+}
+
 type ModelUsageEvent struct {
 	ID                    int64
 	BindingID             int64

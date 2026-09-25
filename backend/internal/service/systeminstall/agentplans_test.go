@@ -6,8 +6,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/service/harnessupdate"
 )
 
 type installCapabilitiesStub struct {
@@ -563,6 +565,129 @@ func TestResolveAgentMethodRejectsUnknownOrUnavailableMethod(t *testing.T) {
 	plan, err := s.resolveAgentMethod(TargetCodex, "homebrew")
 	if err != nil || plan.Method != "homebrew" {
 		t.Fatalf("resolve homebrew = %+v, %v", plan, err)
+	}
+}
+
+func TestNPMPackageNameStripsDistTagButKeepsScope(t *testing.T) {
+	for _, tt := range []struct{ pkg, want string }{
+		{pkg: "@anthropic-ai/claude-code", want: "@anthropic-ai/claude-code"},
+		{pkg: "opencode-ai@latest", want: "opencode-ai"},
+		{pkg: "cline@latest", want: "cline"},
+		{pkg: "@qwen-code/qwen-code@latest", want: "@qwen-code/qwen-code"},
+	} {
+		if got := npmPackageName(tt.pkg); got != tt.want {
+			t.Errorf("npmPackageName(%q) = %q, want %q", tt.pkg, got, tt.want)
+		}
+	}
+}
+
+func TestPlanBuildersSetPackageRegistryForQueryableMethods(t *testing.T) {
+	s := newTestService("darwin", "npm", "brew", "bun", "uv", "pipx")
+
+	npmPlan := s.planNPM(TargetClaudeCode, "@anthropic-ai/claude-code")
+	if npmPlan.PackageRegistry != "npm" || npmPlan.PackageName != "@anthropic-ai/claude-code" {
+		t.Fatalf("npm plan registry/name = %q/%q", npmPlan.PackageRegistry, npmPlan.PackageName)
+	}
+
+	taggedNPMPlan := s.planNPM(TargetCline, "cline@latest")
+	if taggedNPMPlan.PackageRegistry != "npm" || taggedNPMPlan.PackageName != "cline" {
+		t.Fatalf("tagged npm plan registry/name = %q/%q", taggedNPMPlan.PackageRegistry, taggedNPMPlan.PackageName)
+	}
+
+	coreFormula := s.planBrew(TargetQwen, "qwen-code")
+	if coreFormula.PackageRegistry != "homebrew-formula" || coreFormula.PackageName != "qwen-code" {
+		t.Fatalf("homebrew formula registry/name = %q/%q", coreFormula.PackageRegistry, coreFormula.PackageName)
+	}
+
+	cask := s.planBrewCask(TargetClaudeCode, "claude-code")
+	if cask.PackageRegistry != "homebrew-cask" || cask.PackageName != "claude-code" {
+		t.Fatalf("homebrew cask registry/name = %q/%q", cask.PackageRegistry, cask.PackageName)
+	}
+
+	thirdPartyTap := s.planBrew(TargetCrush, "charmbracelet/tap/crush")
+	if thirdPartyTap.PackageRegistry != "" {
+		t.Fatalf("third-party tap has PackageRegistry = %q, want empty (no public API for it)", thirdPartyTap.PackageRegistry)
+	}
+
+	uvPlan := s.planUV(TargetVibe, "mistral-vibe")
+	if uvPlan.PackageRegistry != "pypi" || uvPlan.PackageName != "mistral-vibe" {
+		t.Fatalf("uv plan registry/name = %q/%q", uvPlan.PackageRegistry, uvPlan.PackageName)
+	}
+
+	pipxPlan := s.planPipx(TargetVibe, "mistral-vibe")
+	if pipxPlan.PackageRegistry != "pypi" || pipxPlan.PackageName != "mistral-vibe" {
+		t.Fatalf("pipx plan registry/name = %q/%q", pipxPlan.PackageRegistry, pipxPlan.PackageName)
+	}
+
+	bunPlan := s.planBun(TargetOMP)
+	if bunPlan.PackageRegistry != "npm" || bunPlan.PackageName != "@oh-my-pi/pi-coding-agent" {
+		t.Fatalf("bun plan registry/name = %q/%q", bunPlan.PackageRegistry, bunPlan.PackageName)
+	}
+
+	official := s.planShellInstaller(TargetCodex, "https://chatgpt.com/codex/install.sh", "sh")
+	if official.PackageRegistry != "" {
+		t.Fatalf("official-installer plan has PackageRegistry = %q, want empty", official.PackageRegistry)
+	}
+}
+
+type fakeLatestVersionChecker map[string]harnessupdate.Latest
+
+func (f fakeLatestVersionChecker) Latest(_ context.Context, registry, name string) (harnessupdate.Latest, bool) {
+	latest, ok := f[registry+"\x00"+name]
+	return latest, ok
+}
+
+func TestAgentPlansPopulatesLatestVersionFromChecker(t *testing.T) {
+	s := newTestService("linux", "npm")
+	checkedAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	s.latestVersions = fakeLatestVersionChecker{
+		"npm\x00@anthropic-ai/claude-code": {Version: "2.5.0", CheckedAt: checkedAt},
+	}
+
+	plans, err := s.AgentPlans(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, plan := range plans {
+		if plan.AgentID != string(TargetClaudeCode) {
+			continue
+		}
+		for _, method := range plan.Methods {
+			if method.ID != "npm" {
+				continue
+			}
+			if method.LatestVersion != "2.5.0" {
+				t.Fatalf("npm method LatestVersion = %q, want 2.5.0", method.LatestVersion)
+			}
+			if method.LatestVersionCheckedAt == nil || !method.LatestVersionCheckedAt.Equal(checkedAt) {
+				t.Fatalf("npm method LatestVersionCheckedAt = %v, want %v", method.LatestVersionCheckedAt, checkedAt)
+			}
+			return
+		}
+		t.Fatal("claude-code plan has no npm method")
+	}
+	t.Fatal("no plan for claude-code")
+}
+
+func TestAgentPlansLeavesLatestVersionEmptyWithoutAQueryableRegistry(t *testing.T) {
+	s := newTestService("linux", "curl", "bash", "sh")
+	s.latestVersions = fakeLatestVersionChecker{
+		"npm\x00codex": {Version: "9.9.9", CheckedAt: time.Now()},
+	}
+
+	plans, err := s.AgentPlans(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, plan := range plans {
+		if plan.AgentID != string(TargetCodex) {
+			continue
+		}
+		for _, method := range plan.Methods {
+			if method.ID == "official-installer" && method.LatestVersion != "" {
+				t.Fatalf("official-installer method has LatestVersion = %q, want empty", method.LatestVersion)
+			}
+		}
 	}
 }
 
