@@ -1,8 +1,13 @@
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { aoBridge } from "../../lib/bridge";
-import { readElicitationDraft, resetElicitationDraftPruning, writeElicitationDraft } from "../../lib/elicitation-drafts";
+import {
+	elicitationDraftKey,
+	readElicitationDraft,
+	resetElicitationDraftPruning,
+	writeElicitationDraft,
+} from "../../lib/elicitation-drafts";
 import type { ConversationActivity } from "../../types/conversation";
 import { ElicitationDock } from "./ElicitationDock";
 
@@ -274,6 +279,45 @@ describe("ElicitationDock", () => {
 		await user.click(screen.getByRole("button", { name: "Back" }));
 		expect(screen.getByRole("radio", { name: /Native/ })).toBeChecked();
 		expect(screen.getByLabelText("Other approach")).toHaveValue("Hybrid");
+	});
+
+	it("retries a failed draft write until storage recovers, without needing another edit", () => {
+		vi.useFakeTimers();
+		try {
+			// A failed write must not be mistaken for an already-saved one: nothing
+			// else would prompt a retry if the human never touches the form again.
+			// Only the draft write itself fails once — not the unrelated sweep
+			// marker the dock also writes on mount.
+			let failNextDraftWrite = true;
+			const originalSetItem = window.localStorage.setItem.bind(window.localStorage);
+			vi.spyOn(window.localStorage, "setItem").mockImplementation((key: string, value: string) => {
+				if (failNextDraftWrite && key === elicitationDraftKey("conversation-1", "request-1")) {
+					failNextDraftWrite = false;
+					throw new DOMException("quota exceeded", "QuotaExceededError");
+				}
+				originalSetItem(key, value);
+			});
+
+			render(
+				<ElicitationDock
+					activity={activity({ inputMode: "form", schema: claudeQuestions })}
+					conversationId="conversation-1"
+					onResolve={vi.fn()}
+				/>,
+			);
+
+			fireEvent.click(screen.getByRole("radio", { name: /Native/ }));
+			expect(readElicitationDraft("conversation-1", "request-1")).toBeUndefined();
+
+			act(() => {
+				vi.advanceTimersByTime(3000);
+			});
+
+			expect(readElicitationDraft("conversation-1", "request-1")?.values.question_0).toBe("Native");
+		} finally {
+			vi.useRealTimers();
+			vi.restoreAllMocks();
+		}
 	});
 
 	it.each(["decline", "cancel"] as const)("drops the draft on %s the same as on accept", async (action) => {

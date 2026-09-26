@@ -18,6 +18,9 @@ type InputValue = ElicitationDraftValue;
 type PropertyEntry = [string, Record<string, unknown>];
 type ElicitationDraftKey = { conversationId: string; requestId: string };
 
+/** How long to wait before retrying a draft write that failed (e.g. quota). */
+const ELICITATION_DRAFT_RETRY_DELAY_MS = 3000;
+
 /** Keeps a restored question index inside the bounds of the current question set. */
 function clampActiveQuestion(index: number, questionGroups: PropertyEntry[][] | undefined): number {
 	if (!questionGroups || questionGroups.length === 0) return 0;
@@ -253,35 +256,67 @@ function FormRequest({
 	);
 	const [missing, setMissing] = useState<Set<string>>(new Set());
 	// A restored question index is clamped to the current question set: the
-	// index came from a draft the fingerprint check already trusts, but an
-	// out-of-range value would otherwise fall back to showing every field at
-	// once instead of the step-by-step flow.
+	// index came from storage, and an out-of-range value would otherwise fall
+	// back to showing every field at once instead of the step-by-step flow.
 	const [activeQuestion, setActiveQuestion] = useState(() =>
 		clampActiveQuestion(draft?.activeQuestion ?? 0, questionGroups),
 	);
-	// Tracks what was last written (or the initial, unwritten state) so a write
-	// only happens when something actually changed. A boolean "was this ever
-	// touched" flag needs every state-changing handler to remember to set it —
-	// Back already forgot once — where comparing against the last write can't be
-	// missed by a future handler. Comparing against the *initial* state instead
-	// of the last write wouldn't work either: restore at question 0, go Next,
-	// then Back lands back on question 0, which looks unchanged from the start
-	// but must still overwrite the draft that Next just saved at question 1.
+	// Tracks what was last *successfully* written (or the initial, unwritten
+	// state) so a write only happens when something actually changed. A
+	// boolean "was this ever touched" flag needs every state-changing handler
+	// to remember to set it — Back already forgot once — where comparing
+	// against the last write can't be missed by a future handler. Comparing
+	// against the *initial* state instead of the last write wouldn't work
+	// either: restore at question 0, go Next, then Back lands back on question
+	// 0, which looks unchanged from the start but must still overwrite the
+	// draft that Next just saved at question 1. A failed write must not
+	// advance this: doing so would make an untouched answer that failed to
+	// save look already saved, with no further edit left to trigger a retry.
 	const lastWritten = useRef({ values, activeQuestion });
-
-	useEffect(() => {
+	// Holds the pending retry timer, and — via reassignment on every render —
+	// always the latest values/activeQuestion/draftKey/sessionId to retry
+	// with, so a retry firing after a later edit uses that edit rather than a
+	// stale snapshot from when the failure happened.
+	const retryTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+	const attemptWrite = useRef<(() => void) | undefined>(undefined);
+	attemptWrite.current = () => {
 		if (!draftKey) return;
-		if (lastWritten.current.activeQuestion === activeQuestion && valuesEqual(lastWritten.current.values, values)) return;
 		const result = writeElicitationDraft(draftKey.conversationId, draftKey.requestId, { values, activeQuestion });
-		lastWritten.current = { values, activeQuestion };
 		// Reported the same way a failed composer or queued-edit write is: a
 		// silently dropped write here is exactly the bug this module exists to
 		// prevent, so the leave/quit guard needs to know about it too.
 		if (sessionId) setChatDraftBoundary(sessionId, "elicitation", result.ok ? undefined : "persistence-failed");
-	}, [draftKey?.conversationId, draftKey?.requestId, sessionId, values, activeQuestion]);
+		if (result.ok) {
+			lastWritten.current = { values, activeQuestion };
+			return;
+		}
+		// A quota or storage failure is often transient. Retry without waiting
+		// for another edit — nothing else would otherwise prompt one if the
+		// human never touches the form again after the failure.
+		retryTimer.current = setTimeout(() => attemptWrite.current?.(), ELICITATION_DRAFT_RETRY_DELAY_MS);
+	};
+
+	useEffect(() => {
+		if (!draftKey) return;
+		if (lastWritten.current.activeQuestion === activeQuestion && valuesEqual(lastWritten.current.values, values)) return;
+		// A fresh write supersedes any retry still pending from an earlier failure.
+		clearTimeout(retryTimer.current);
+		attemptWrite.current?.();
+	}, [draftKey?.conversationId, draftKey?.requestId, values, activeQuestion]);
+
+	// `disabled` goes true the moment Cancel/Skip/Continue is clicked, and (on
+	// success) stays true afterward — see the comment in ElicitationDock's own
+	// `resolve`. The submitted answer went to `onResolve` directly from React
+	// state, not through this draft, so a retry gains nothing once disabled;
+	// letting one fire anyway risks re-creating a draft that resolving just
+	// cleared.
+	useEffect(() => {
+		if (disabled) clearTimeout(retryTimer.current);
+	}, [disabled]);
 
 	useEffect(
 		() => () => {
+			clearTimeout(retryTimer.current);
 			if (sessionId) setChatDraftBoundary(sessionId, "elicitation", undefined);
 		},
 		[sessionId],
