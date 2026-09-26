@@ -234,8 +234,9 @@ function FormRequest({
 	const properties = useMemo(() => Object.entries(schema?.properties ?? {}), [schema?.properties]);
 	const questionGroups = useMemo(() => claudeQuestionGroups(properties), [properties]);
 	const required = useMemo(() => new Set(schema?.required ?? []), [schema?.required]);
-	// One sweep of abandoned drafts per renderer run, paid when a question first
-	// appears rather than on every edit.
+	// ChatWorkspace already schedules this sweep independently of any question
+	// appearing; this call is a cheap, interval-gated no-op there. It stays so
+	// this component keeps sweeping on its own when used outside ChatWorkspace.
 	useEffect(() => {
 		pruneExpiredElicitationDraftsOnce();
 	}, []);

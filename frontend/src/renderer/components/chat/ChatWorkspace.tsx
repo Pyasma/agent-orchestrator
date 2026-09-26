@@ -115,7 +115,10 @@ import { ActivityRun } from "./ActivityRun";
 import { TurnPlan } from "./TurnPlan";
 import { TurnSettingsBar } from "./TurnSettingsBar";
 import { ElicitationDock } from "./ElicitationDock";
-import { clearElicitationDraft } from "../../lib/elicitation-drafts";
+import {
+	pruneExpiredElicitationDraftsOnce,
+	reconcileElicitationDraftsForConversation,
+} from "../../lib/elicitation-drafts";
 import { McpServerBanner, ReauthBanner, ThreadStateBanner } from "./ChatStatusBanners";
 import {
 	activeTurn,
@@ -1194,16 +1197,20 @@ function ChatWorkspaceContent({
 	// A question can stop being pending without this dock ever resolving it: a
 	// 30-minute approval wait times out, the agent is stopped or interrupted,
 	// another window or mobile answers it, or the controller fails. None of
-	// those paths call onResolve, so the draft this session saved for it would
-	// otherwise sit in storage untouched until its 7-day expiry. Whenever the
-	// pending request changes — including to nothing — drop the draft for
-	// whichever request id was pending a moment ago.
-	const previousPendingUserInputId = useRef<string | undefined>(undefined);
+	// those paths call onResolve, so the draft this conversation saved for it
+	// would otherwise sit in storage untouched until its 7-day expiry.
+	//
+	// Reconciling against the loaded snapshot — rather than only reacting to a
+	// live change in stablePendingUserInput — also covers the case where this
+	// whole workspace was unmounted (a session switch) while the question was
+	// still open: a plain "did it change since I last saw it" comparison would
+	// start fresh on the next mount and never notice the old request is gone.
+	// The sweep is scheduled here too, unconditionally, so an abandoned draft
+	// still gets cleaned up on its own schedule even in a conversation that
+	// never shows a question again.
 	useEffect(() => {
-		const previous = previousPendingUserInputId.current;
-		const current = stablePendingUserInput?.requestId;
-		if (previous && previous !== current) clearElicitationDraft(snapshot.conversationId, previous);
-		previousPendingUserInputId.current = current;
+		pruneExpiredElicitationDraftsOnce();
+		reconcileElicitationDraftsForConversation(snapshot.conversationId, stablePendingUserInput?.requestId);
 	}, [snapshot.conversationId, stablePendingUserInput?.requestId]);
 	const composerElicitation = useMemo(
 		() =>

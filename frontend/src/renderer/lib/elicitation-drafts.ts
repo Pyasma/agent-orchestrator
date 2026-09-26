@@ -133,6 +133,37 @@ export function clearElicitationDraft(
 }
 
 /**
+ * Removes every draft this conversation is holding except the one for
+ * `currentRequestId` (if any question is pending). A ChatWorkspace mount only
+ * ever sees the requests that come and go while it stays mounted; a question
+ * that resolves elsewhere, times out, or is answered from another window
+ * while this conversation's Chat surface is unmounted never fires that
+ * transition here. Reconciling directly against the loaded snapshot instead —
+ * on every mount, not only on a live change — catches that case too, well
+ * inside the sweep's 7-day window rather than only at its end.
+ */
+export function reconcileElicitationDraftsForConversation(
+	conversationId: string,
+	currentRequestId: string | undefined,
+	storage: ElicitationDraftStorage | undefined = rendererStorage(),
+): void {
+	if (!storage || typeof storage.key !== "function" || typeof storage.length !== "number") return;
+	const prefix = `${KEY_PREFIX}${conversationId}:`;
+	const currentKey = currentRequestId ? elicitationDraftKey(conversationId, currentRequestId) : undefined;
+	const stale: string[] = [];
+	try {
+		for (let index = 0; index < storage.length; index += 1) {
+			const key = storage.key(index);
+			if (!key || !key.startsWith(prefix) || key === currentKey) continue;
+			stale.push(key);
+		}
+		for (const key of stale) storage.removeItem(key);
+	} catch {
+		// Reconciliation is opportunistic, same as the sweep.
+	}
+}
+
+/**
  * Sweeps expired drafts at most once per `SWEEP_INTERVAL_MS`, tracked in
  * storage itself rather than in memory: a once-per-process guard never runs
  * again in a window left open for days, which is exactly when an abandoned

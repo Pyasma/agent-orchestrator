@@ -29,6 +29,7 @@ import {
 	getChatDraftBoundaries,
 	getChatDraftBoundary,
 } from "../../lib/chat-draft-boundary";
+import { readElicitationDraft } from "../../lib/elicitation-drafts";
 import { TooltipProvider } from "../ui/tooltip";
 
 const renameSessionMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
@@ -786,6 +787,24 @@ describe("ChatWorkspace timeline", () => {
 
 		render(<ChatWorkspace snapshot={snapshot} onResolveInput={vi.fn()} />);
 		expect(screen.getByRole("radio", { name: "ACP" })).toBeChecked();
+	});
+
+	it("drops a draft left behind by a question resolved while this workspace was unmounted", async () => {
+		// A live transition (the pending request changing while mounted) is not
+		// the only way a question stops being pending: switching sessions
+		// unmounts this whole workspace, and the question can time out, get
+		// answered elsewhere, or the agent process can restart before the human
+		// switches back. The next mount has to notice this on its own, not only
+		// react to a change it happened to see.
+		const user = userEvent.setup();
+		const pending = withUserInput("pending");
+		const first = render(<ChatWorkspace snapshot={pending} onResolveInput={vi.fn()} />);
+
+		await user.click(screen.getByRole("radio", { name: "ACP" }));
+		first.unmount();
+
+		render(<ChatWorkspace snapshot={withUserInput("completed")} onResolveInput={vi.fn()} />);
+		expect(readElicitationDraft(chatFixture.conversationId, "input-1")).toBeUndefined();
 	});
 
 	it("does not interrupt while an elicitation is open", () => {
